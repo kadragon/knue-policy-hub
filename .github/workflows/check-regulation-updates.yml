@@ -1,0 +1,146 @@
+name: Check Regulation Updates
+
+on:
+  schedule:
+    - cron: '0 0 * * 1' # Every Monday 00:00 UTC (09:00 KST)
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: write
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv pip install ./tools --system
+
+      - name: Check for regulation updates
+        id: check
+        run: |
+          python tools/check_updates.py --json > /tmp/check_result.json
+          cat /tmp/check_result.json
+
+          CHANGED=$(jq '.changed | length' /tmp/check_result.json)
+          NEW=$(jq '.new | length' /tmp/check_result.json)
+          REMOVED=$(jq '.removed | length' /tmp/check_result.json)
+          TOTAL=$((CHANGED + NEW + REMOVED))
+
+          echo "total_changes=$TOTAL" >> "$GITHUB_OUTPUT"
+
+      - name: Create issues for changes
+        if: steps.check.outputs.total_changes != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create regulation-update \
+            --color "d93f0b" \
+            --description "규정 변경 감지" 2>/dev/null || true
+
+          TODAY=$(date -u +%Y-%m-%d)
+
+          # --- Changed regulations ---
+          CHANGED_COUNT=$(jq '.changed | length' /tmp/check_result.json)
+          for i in $(seq 0 $((CHANGED_COUNT - 1))); do
+            NAME=$(jq -r ".changed[$i].name" /tmp/check_result.json)
+            OLD_FNO=$(jq -r ".changed[$i].old_file_no" /tmp/check_result.json)
+            NEW_FNO=$(jq -r ".changed[$i].new_file_no" /tmp/check_result.json)
+            SECTION=$(jq -r ".changed[$i].section" /tmp/check_result.json)
+
+            TITLE="[규정 변경] ${NAME}"
+
+            EXISTING=$(gh issue list --search "\"${TITLE}\" in:title" --state open --json number --jq 'length')
+            if [ "$EXISTING" -gt 0 ]; then
+              echo "Skip duplicate: $TITLE"
+              continue
+            fi
+
+            gh issue create \
+              --title "$TITLE" \
+              --label "regulation-update" \
+              --body "$(cat <<EOF
+          ## 규정 변경 감지
+
+          - **규정명**: ${NAME}
+          - **분류**: ${SECTION}
+          - **이전 fileNo**: ${OLD_FNO}
+          - **새 fileNo**: ${NEW_FNO}
+          - **감지일**: ${TODAY}
+          EOF
+          )"
+          done
+
+          # --- New regulations ---
+          NEW_COUNT=$(jq '.new | length' /tmp/check_result.json)
+          for i in $(seq 0 $((NEW_COUNT - 1))); do
+            NAME=$(jq -r ".new[$i].name" /tmp/check_result.json)
+            FNO=$(jq -r ".new[$i].file_no" /tmp/check_result.json)
+
+            TITLE="[신규 규정] ${NAME}"
+
+            EXISTING=$(gh issue list --search "\"${TITLE}\" in:title" --state open --json number --jq 'length')
+            if [ "$EXISTING" -gt 0 ]; then
+              echo "Skip duplicate: $TITLE"
+              continue
+            fi
+
+            gh issue create \
+              --title "$TITLE" \
+              --label "regulation-update" \
+              --body "$(cat <<EOF
+          ## 신규 규정 감지
+
+          - **규정명**: ${NAME}
+          - **fileNo**: ${FNO}
+          - **감지일**: ${TODAY}
+          EOF
+          )"
+          done
+
+          # --- Removed regulations ---
+          REMOVED_COUNT=$(jq '.removed | length' /tmp/check_result.json)
+          for i in $(seq 0 $((REMOVED_COUNT - 1))); do
+            NAME=$(jq -r ".removed[$i].name" /tmp/check_result.json)
+            FNO=$(jq -r ".removed[$i].file_no" /tmp/check_result.json)
+            SECTION=$(jq -r ".removed[$i].section" /tmp/check_result.json)
+
+            TITLE="[규정 삭제] ${NAME}"
+
+            EXISTING=$(gh issue list --search "\"${TITLE}\" in:title" --state open --json number --jq 'length')
+            if [ "$EXISTING" -gt 0 ]; then
+              echo "Skip duplicate: $TITLE"
+              continue
+            fi
+
+            gh issue create \
+              --title "$TITLE" \
+              --label "regulation-update" \
+              --body "$(cat <<EOF
+          ## 규정 삭제 감지
+
+          - **규정명**: ${NAME}
+          - **분류**: ${SECTION}
+          - **기존 fileNo**: ${FNO}
+          - **감지일**: ${TODAY}
+          EOF
+          )"
+          done
+
+      - name: Update regulations.json
+        run: python tools/check_updates.py --update
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tools/regulations.json
+          git diff --staged --quiet && exit 0
+          git commit -m "chore: regulations.json 자동 업데이트 ($(date -u +%Y-%m-%d))"
+          git push
