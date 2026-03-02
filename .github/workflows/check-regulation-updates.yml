@@ -25,7 +25,7 @@ jobs:
       - name: Check for regulation updates
         id: check
         run: |
-          python tools/check_updates.py --json > /tmp/check_result.json
+          uv run --system tools/check_updates.py --json > /tmp/check_result.json
           cat /tmp/check_result.json
 
           CHANGED=$(jq '.changed | length' /tmp/check_result.json)
@@ -134,7 +134,7 @@ jobs:
           done
 
       - name: Update regulations.json
-        run: python tools/check_updates.py --update
+        run: uv run --system tools/check_updates.py --update
 
       - name: Commit and push changes
         run: |
