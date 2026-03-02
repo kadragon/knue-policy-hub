@@ -83,21 +83,21 @@ def compare(
     actually_new: list[dict] = []
     actually_removed: list[dict] = []
 
-    # 사라진 fileNo의 규정 중, 새 fileNo로 이름이 이동한 경우 → 변경으로 처리
+    # 사라진 fileNo의 규정 중, 웹에 같은 이름이 존재하는 경우 → 변경으로 처리
     matched_new_file_nos: set[int] = set()
     for fno in removed_file_nos:
         reg = stored_by_file_no[fno]
         name = reg["name"]
         if name in web_by_name:
             new_fno = web_by_name[name]
+            changed.append({
+                "name": name,
+                "old_file_no": fno,
+                "new_file_no": new_fno,
+                "section": reg["section"],
+                "local_path": reg["local_path"],
+            })
             if new_fno in new_file_nos:
-                changed.append({
-                    "name": name,
-                    "old_file_no": fno,
-                    "new_file_no": new_fno,
-                    "section": reg["section"],
-                    "local_path": reg["local_path"],
-                })
                 matched_new_file_nos.add(new_fno)
         else:
             actually_removed.append({

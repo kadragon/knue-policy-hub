@@ -10,7 +10,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
-only-include = ["check_updates.py"]
+only-include = ["check_updates.py", "regulations.json"]
 
 [project.scripts]
 check-updates = "check_updates:main"
