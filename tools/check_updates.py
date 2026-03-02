@@ -246,11 +246,7 @@ def main() -> None:
         if changed or new or removed:
             apply_updates(data, changed, new, removed)
         else:
-            data["last_checked"] = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            save_regulations(data)
-            print("변경 사항 없음, last_checked만 업데이트")
+            print("변경 사항 없음")
 
 
 if __name__ == "__main__":
