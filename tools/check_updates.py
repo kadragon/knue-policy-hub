@@ -16,6 +16,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 REGULATIONS_PATH = Path(__file__).parent / "regulations.json"
+MIN_EXPECTED_REGULATIONS = 85
 
 
 def load_regulations() -> dict:
@@ -226,7 +227,7 @@ def main() -> None:
 
     web = fetch_web_regulations(data["source_url"])
 
-    if len(web) < 85:
+    if len(web) < MIN_EXPECTED_REGULATIONS:
         print(
             f"경고: 파싱된 규정 수가 {len(web)}개로 너무 적습니다. "
             "웹사이트 구조가 변경되었을 수 있습니다.",
