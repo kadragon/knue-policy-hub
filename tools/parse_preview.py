@@ -3,7 +3,7 @@
 knue-www-preview-parser-cf(Cloudflare Worker + Puppeteer)의 파싱 로직을
 Python + Playwright(chromium headless)로 포팅한다.
 
-URL 규칙: https://www.knue.ac.kr/www/previewBbsFile.do?atchmnflNo={file_no}
+URL 규칙: https://www.knue.ac.kr/www/previewMenuCntFile.do?key=392&fileNo={file_no}
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import re
 import sys
 from dataclasses import dataclass
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 PREVIEW_URL = "https://www.knue.ac.kr/www/previewMenuCntFile.do?key=392&fileNo={file_no}"
 NAVIGATE_TIMEOUT_MS = 30_000
@@ -64,13 +64,18 @@ def _scroll_to_bottom(page) -> None:
         page.evaluate(f"() => window.scrollBy(0, {SCROLL_STEP_PX})")
         page.wait_for_timeout(200)
         total += SCROLL_STEP_PX
+    else:
+        print(
+            f"WARN: scroll cap reached ({MAX_SCROLL_PX}px) — content may be truncated",
+            file=sys.stderr,
+        )
 
 
 def _flush_table(buffer: list[list[str]], out: list[str]) -> None:
     if not buffer:
         return
     cols = max(len(row) for row in buffer)
-    if cols < 2:
+    if cols < 2 or len(buffer) < 2:
         for row in buffer:
             out.append(" ".join(row))
         buffer.clear()
@@ -137,12 +142,12 @@ def parse_preview(file_no: int, headless: bool = True) -> ParseResult:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="KNUE 규정 미리보기 파서")
-    parser.add_argument("--file-no", type=int, required=True, help="atchmnflNo (= regulations.json의 file_no)")
+    parser.add_argument("--file-no", type=int, required=True, help="regulations.json 의 file_no (미리보기 URL fileNo)")
     parser.add_argument("--no-headless", action="store_true", help="디버그용: 브라우저 창 표시")
     args = parser.parse_args()
     try:
         result = parse_preview(args.file_no, headless=not args.no_headless)
-    except Exception as e:  # playwright 런타임 오류 포함
+    except (RuntimeError, PlaywrightError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
     sys.stdout.write(result.markdown)

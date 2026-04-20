@@ -50,46 +50,62 @@ gh issue list --label regulation-update --state open --limit 200 \
 
 삭제 → 변경 → 신규 순으로 처리(의존성 최소화).
 
+> **중요 — regulations.json 선(先)갱신 상태**  
+> 이슈를 만드는 주간 워크플로(`check-regulation-updates.yml`)는 이슈 생성 **직후** `tools/check_updates.py --update` 를 돌려 `tools/regulations.json` 을 이미 갱신하고 커밋한다. 따라서 이 스킬이 실행될 시점에는:  
+> - **변경 이슈**: 엔트리의 `file_no` 는 이미 `새 fileNo` 로 바뀌어 있다(그 외 필드 `name`/`section`/`local_path` 는 유지). 마크다운 파일만 아직 구버전이다.  
+> - **신규 이슈**: 엔트리가 이미 추가돼 있으며 `section=""`, `local_path=null`. 마크다운 파일은 없다. 이 스킬이 `section` 을 결정해 채우고 파일을 생성한다.  
+> - **삭제 이슈**: 엔트리는 이미 제거됐다. 마크다운 파일만 남아 있을 수 있다. 이슈 body 의 `규정명 + 분류` 로 `규정/<section>/<name>.md` 를 역산해 삭제한다.
+
 ### 3. 삭제 이슈 처리 (per issue)
 
+이슈 body 에서 `규정명(<name>)`, `분류(<section>)` 추출.
+
 ```bash
-# regulations.json 에서 엔트리 조회 (name 또는 file_no 기준)
-# Edit 툴로 regulations.json 에서 해당 엔트리 제거
-# 파일 시스템에서 local_path 삭제
-rm -- "<local_path>"
-git add tools/regulations.json "<local_path>"
+DEST="규정/<section>/<name>.md"
+if [ ! -f "$DEST" ]; then
+  echo "skipped (이미 처리됨): #<N>"
+  # 다음 이슈로
+fi
+git rm -- "$DEST"
 git commit -m "[FIX] 규정 삭제: <name> (closes #<N>)"
 ```
 
+`regulations.json` 은 워크플로가 이미 갱신했으므로 건드리지 않는다.
+
 ### 4. 변경 이슈 처리 (per issue)
 
+이슈 body 에서 `새 fileNo(<new_fno>)`, `분류(<section>)`, `규정명(<name>)` 추출.
+
+a) `regulations.json` 에서 `file_no == <new_fno>` 엔트리를 찾아 `local_path` 획득(= `DEST`).  
+b) 미리보기 파싱:
 ```bash
-# a) 대상 경로 확인: regulations.json 에서 name/old_file_no 로 엔트리 찾기 → local_path
-# b) 미리보기 파싱
-uv run --project tools python tools/parse_preview.py --file-no <new_file_no> \
-  > "/tmp/raw_<new_file_no>.md"
+uv run --project tools python tools/parse_preview.py --file-no <new_fno> \
+  > "/tmp/raw_<new_fno>.md"
 ```
-
-`c)` Haiku 서브에이전트 띄워 재정렬 + Write — 아래 "서브에이전트 프롬프트 템플릿" 사용. `subagent_type: general-purpose`, `model: haiku`.
-
-`d)` 완료 후:
+c) Haiku 서브에이전트 호출 — 아래 "서브에이전트 프롬프트 템플릿" 사용. `subagent_type: general-purpose`, `model: haiku`. `<DEST_PATH>` 는 기존 파일을 덮어쓰는 경로.  
+d) 품질 점검(아래 섹션) 통과 시 커밋. `regulations.json` 은 워크플로가 이미 갱신했으므로 마크다운 파일만 변경된다:
 ```bash
-# Edit 툴로 regulations.json 에서 해당 엔트리의 file_no 를 new_file_no 로 갱신
-git add tools/regulations.json "<local_path>"
-git commit -m "[FIX] 규정 갱신: <name> (fileNo <old>→<new>, closes #<N>)"
+git add -- "$DEST"
+git commit -m "[FIX] 규정 갱신: <name> (fileNo=<new_fno>, closes #<N>)"
 ```
 
 ### 5. 신규 이슈 처리 (per issue)
 
-1. AskUserQuestion 으로 편/장(section) 결정: `기존 section 후보 + 직접 입력`.
-2. 대상 경로: `규정/<section>/<name>.md`. 이미 존재하면 스킵(사용자에게 보고).
-3. 파싱: `parse_preview.py --file-no <fileNo>` → `/tmp/raw_<fileNo>.md`
+이슈 body 에서 `fileNo(<fno>)`, `규정명(<name>)` 추출.
+
+1. **section 결정**: AskUserQuestion 으로 편/장 선택(기존 `regulations.json` 의 `section` 값 후보 + 직접 입력).
+2. 대상 경로 `DEST="규정/<section>/<name>.md"`. 이미 존재하면 스킵(사용자에게 보고).
+3. 파싱: `parse_preview.py --file-no <fno>` → `/tmp/raw_<fno>.md`
 4. Haiku 서브에이전트로 재정렬 + Write (아래 템플릿).
-5. Edit 툴로 regulations.json 에 엔트리 추가:
+5. 품질 점검 통과 시 `regulations.json` 의 `file_no == <fno>` 엔트리를 갱신(Edit 툴):
    ```json
-   { "name": "<name>", "file_no": <fileNo>, "section": "<section>", "local_path": "규정/<section>/<name>.md" }
+   { "name": "<name>", "file_no": <fno>, "section": "<section>", "local_path": "규정/<section>/<name>.md" }
    ```
-6. `git add` + `git commit -m "[FEAT] 신규 규정: <name> (fileNo=<fileNo>, closes #<N>)"`
+6. 커밋:
+   ```bash
+   git add tools/regulations.json -- "$DEST"
+   git commit -m "[FEAT] 신규 규정: <name> (fileNo=<fno>, closes #<N>)"
+   ```
 
 ### 6. 요약 보고
 
@@ -149,17 +165,19 @@ PR/이슈 닫기는 수동. 커밋 메시지에 `closes #N` 이 있어 PR 머지
 
 ## 재실행 안전성
 
-각 이슈 처리 전에 선(先)체크로 스킵 여부를 판정해 중복 커밋을 방지한다.
+`regulations.json` 은 주간 워크플로가 선(先)갱신하므로 **스킵 판정 기준으로 쓰지 않는다**. 대신 마크다운 파일 상태와 git 로그를 기준으로 한다.
 
-- **변경**: `regulations.json` 의 해당 엔트리 `file_no` 가 이슈의 `새 fileNo` 와 같으면 스킵.
-- **신규**: `regulations.json` 에 동일 `file_no` 엔트리가 이미 있거나 `규정/<section>/<name>.md` 가 이미 존재하면 스킵.
-- **삭제**: `regulations.json` 에 해당 엔트리가 없고 `local_path` 파일도 없으면 스킵.
+각 이슈 처리 전 선체크:
+
+- **변경**: `git log --all --grep="closes #<N>" --oneline` 결과가 존재하면 스킵(이미 커밋됨).
+- **신규**: `regulations.json` 의 `file_no == <fno>` 엔트리 `section` 이 비어있지 않고 `local_path` 가 실제 파일을 가리키면 스킵(이 스킬이 이미 채워둔 상태).
+- **삭제**: 이슈 body 로 역산한 `규정/<section>/<name>.md` 가 존재하지 않으면 스킵(이미 삭제됨).
 
 ## 실패 케이스
 
 - **파싱 실패(본문 0줄)**: `parse_preview.py` 가 exit 1 — 해당 이슈만 스킵.
 - **서브에이전트 품질 미달**: 위 점검 기준 중 하나 이상 실패 — 파일 원복 + 스킵.
-- **regulations.json 엔트리 부재(변경 이슈)**: `check_updates.py --update` 가 아직 안 돈 것 — 사용자에게 먼저 돌리라고 안내.
+- **변경 이슈에서 `file_no == <new_fno>` 엔트리 부재**: 주간 워크플로(`--update` 단계)가 아직 안 돌았거나 실패함 — 사용자에게 워크플로를 먼저 돌리라고 안내.
 
 ## 관련 파일
 
