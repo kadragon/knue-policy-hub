@@ -2,7 +2,12 @@
 name = "knue-regulation-checker"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["httpx>=0.27", "beautifulsoup4>=4.12"]
+dependencies = [
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "playwright>=1.44",
+    "ollama>=0.3",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -10,7 +15,16 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
-only-include = ["check_updates.py", "regulations.json"]
+only-include = [
+    "check_updates.py",
+    "parse_preview.py",
+    "reformat_with_ollama.py",
+    "apply_issues.py",
+    "regulations.json",
+]
 
 [project.scripts]
 check-updates = "check_updates:main"
+parse-preview = "parse_preview:main"
+reformat-with-ollama = "reformat_with_ollama:main"
+apply-issues = "apply_issues:main"
