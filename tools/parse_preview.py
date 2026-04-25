@@ -29,6 +29,9 @@ HR_RE = re.compile(r"^=+$")
 BULLET_RE = re.compile(r"^[ㆍ‣○□]\s*")
 TABLE_SPLIT_RE = re.compile(r"\s{2,}")
 
+_TBL_START = "<<<TBL>>>"
+_TBL_END = "<<</TBL>>>"
+
 
 @dataclass
 class ParseResult:
@@ -41,19 +44,66 @@ def _extract_lines(page) -> list[str]:
 
     innerText 는 요소의 layout 범위(overflow 등)에 의존하므로 대신 DOM 을 직접
     순회하여 블록 요소 경계마다 줄바꿈을 삽입한 뒤 전체 텍스트를 추출한다.
+
+    <table> 요소는 일반 블록 처리에서 제외하고 extractTable() 로 위임해
+    마크다운 표 구조를 보존한다. sentinel(<<<TBL>>>…<<</TBL>>>)로 감싸
+    convert_to_markdown() 에서 그대로 통과시킨다.
     """
     text: str = page.evaluate(
         """() => {
             const BLOCK_TAGS = new Set([
                 'P','DIV','LI','TR','TD','TH','CAPTION','ARTICLE','SECTION',
                 'HEADER','FOOTER','H1','H2','H3','H4','H5','H6',
-                'BLOCKQUOTE','PRE','TABLE','THEAD','TBODY','TFOOT','BR',
+                'BLOCKQUOTE','PRE','THEAD','TBODY','TFOOT','BR',
             ]);
+            function cellText(td) {
+                return (td.textContent || '').replace(/\\s+/g, ' ').trim().replace(/\\|/g, '\\\\|');
+            }
+            function collectRows(tbl) {
+                const rows = [];
+                for (const child of tbl.children) {
+                    const ct = (child.tagName || '').toUpperCase();
+                    if (ct === 'TR') {
+                        rows.push(child);
+                    } else if (ct === 'THEAD' || ct === 'TBODY' || ct === 'TFOOT') {
+                        for (const tr of child.children) {
+                            if ((tr.tagName || '').toUpperCase() === 'TR') rows.push(tr);
+                        }
+                    }
+                }
+                return rows;
+            }
+            function extractTable(table) {
+                const rows = collectRows(table);
+                if (!rows.length) return '';
+                const data = [];
+                for (const tr of rows) {
+                    const cells = [];
+                    for (const cell of tr.children) {
+                        const ct = (cell.tagName || '').toUpperCase();
+                        if (ct === 'TD' || ct === 'TH') {
+                            cells.push(cellText(cell));
+                        }
+                    }
+                    if (cells.length) data.push(cells);
+                }
+                if (!data.length) return '';
+                const cols = Math.max(...data.map(r => r.length));
+                const norm = data.map(r => [...r, ...Array(cols - r.length).fill('')]);
+                const mdLines = [];
+                mdLines.push('| ' + norm[0].join(' | ') + ' |');
+                mdLines.push('|' + Array(cols).fill('---').join('|') + '|');
+                for (const row of norm.slice(1)) {
+                    mdLines.push('| ' + row.join(' | ') + ' |');
+                }
+                return '\\n<<<TBL>>>\\n' + mdLines.join('\\n') + '\\n<<</TBL>>>\\n';
+            }
             function walk(node) {
                 if (node.nodeType === 3) return node.nodeValue || '';
                 if (node.nodeType !== 1) return '';
                 const tag = (node.tagName || '').toUpperCase();
                 if (tag === 'SCRIPT' || tag === 'STYLE') return '';
+                if (tag === 'TABLE') return extractTable(node);
                 const isBlock = BLOCK_TAGS.has(tag);
                 let text = isBlock ? '\\n' : '';
                 for (const child of node.childNodes) text += walk(child);
@@ -119,7 +169,10 @@ def _flush_table(buffer: list[list[str]], out: list[str]) -> None:
     if not buffer:
         return
     cols = max(len(row) for row in buffer)
-    if cols < 2 or len(buffer) < 2:
+    # Require 2+ cols, 2+ rows, and uniform column count to prevent false positives
+    # from whitespace-padded plain text (e.g. kerned Korean department names).
+    all_same_cols = all(len(row) == cols for row in buffer)
+    if cols < 2 or len(buffer) < 2 or not all_same_cols:
         for row in buffer:
             out.append(" ".join(row))
         buffer.clear()
@@ -135,10 +188,34 @@ def _flush_table(buffer: list[list[str]], out: list[str]) -> None:
 
 def convert_to_markdown(lines: list[str]) -> str:
     """중간 마크다운 생성. AI 재포맷 전의 raw 형태."""
+    # Pre-pass: reassemble HTML-extracted table blocks (sentinel <<<TBL>>> … <<</TBL>>>)
+    # into list objects so the main loop can emit them verbatim without heuristic interference.
+    coalesced: list[str | list[str]] = []
+    in_tbl = False
+    tbl_lines: list[str] = []
+    for line in lines:
+        if line == _TBL_START:
+            in_tbl = True
+            tbl_lines = []
+        elif line == _TBL_END:
+            in_tbl = False
+            if tbl_lines:
+                coalesced.append(tbl_lines[:])
+        elif in_tbl:
+            tbl_lines.append(line)
+        else:
+            coalesced.append(line)
+
     out: list[str] = []
     table_buf: list[list[str]] = []
 
-    for raw in lines:
+    for item in coalesced:
+        if isinstance(item, list):
+            _flush_table(table_buf, out)
+            out.extend(item)
+            continue
+
+        raw: str = item
         if TABLE_SPLIT_RE.search(raw) and not H1_BRACKET_RE.match(raw) and not H2_PREFIX_RE.match(raw):
             table_buf.append([c.strip() for c in TABLE_SPLIT_RE.split(raw) if c.strip()])
             continue
