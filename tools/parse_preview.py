@@ -18,9 +18,9 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 PREVIEW_URL = "https://www.knue.ac.kr/www/previewMenuCntFile.do?key=392&fileNo={file_no}"
 NAVIGATE_TIMEOUT_MS = 30_000
 POST_LOAD_WAIT_MS = 5_000
-MAX_SCROLL_PX = 50_000
+MAX_SCROLL_PX = 100_000
 SCROLL_STEP_PX = 800
-STABLE_HEIGHT_STREAK = 3
+STABLE_CONTENT_STREAK = 8  # consecutive same content-length readings before declaring done
 
 FULLWIDTH_DIGITS = "０１２３４５６７８９"
 H2_PREFIX_RE = re.compile(rf"^[{FULLWIDTH_DIGITS}]+\s+")
@@ -37,31 +37,75 @@ class ParseResult:
 
 
 def _extract_lines(page) -> list[str]:
-    """iframe#innerWrap > #content_body 에서 줄 배열을 뽑는다."""
+    """iframe#innerWrap > #content_body 에서 줄 배열을 뽑는다.
+
+    innerText 는 요소의 layout 범위(overflow 등)에 의존하므로 대신 DOM 을 직접
+    순회하여 블록 요소 경계마다 줄바꿈을 삽입한 뒤 전체 텍스트를 추출한다.
+    """
     text: str = page.evaluate(
         """() => {
+            const BLOCK_TAGS = new Set([
+                'P','DIV','LI','TR','TD','TH','CAPTION','ARTICLE','SECTION',
+                'HEADER','FOOTER','H1','H2','H3','H4','H5','H6',
+                'BLOCKQUOTE','PRE','TABLE','THEAD','TBODY','TFOOT','BR',
+            ]);
+            function walk(node) {
+                if (node.nodeType === 3) return node.nodeValue || '';
+                if (node.nodeType !== 1) return '';
+                const tag = (node.tagName || '').toUpperCase();
+                if (tag === 'SCRIPT' || tag === 'STYLE') return '';
+                const isBlock = BLOCK_TAGS.has(tag);
+                let text = isBlock ? '\\n' : '';
+                for (const child of node.childNodes) text += walk(child);
+                if (isBlock) text += '\\n';
+                return text;
+            }
             const iframe = document.querySelector('iframe#innerWrap');
             if (!iframe) return '';
             const doc = iframe.contentDocument;
             if (!doc) return '';
             const body = doc.querySelector('#content_body');
             if (!body) return '';
-            return body.innerText || '';
+            return walk(body);
         }"""
     )
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
 def _scroll_to_bottom(page) -> None:
-    """끝까지 스크롤 — 3회 연속 높이 동일하거나 MAX_SCROLL_PX 초과 시 중단."""
-    last_heights: list[int] = []
+    """끝까지 스크롤해 lazy-load 콘텐츠를 모두 가져온다.
+
+    scrollHeight 대신 #content_body 텍스트 길이로 안정성을 판단한다.
+    scrollHeight 는 lazy-load 트리거 전 초기 상태에서도 변하지 않아 조기 종료를
+    유발하지만, 텍스트 길이는 실제로 새 콘텐츠가 추가될 때만 변한다.
+    """
+    last_lengths: list[int] = []
     total = 0
     while total < MAX_SCROLL_PX:
-        height: int = page.evaluate("() => document.body.scrollHeight")
-        last_heights.append(height)
-        if len(last_heights) >= STABLE_HEIGHT_STREAK and len(set(last_heights[-STABLE_HEIGHT_STREAK:])) == 1:
+        content_len: int = page.evaluate(
+            """() => {
+                const iframe = document.querySelector('iframe#innerWrap');
+                if (iframe && iframe.contentDocument) {
+                    const body = iframe.contentDocument.querySelector('#content_body');
+                    if (body) return body.textContent.length;
+                    return iframe.contentDocument.body.textContent.length;
+                }
+                return document.body.textContent.length;
+            }"""
+        )
+        last_lengths.append(content_len)
+        if len(last_lengths) >= STABLE_CONTENT_STREAK and len(set(last_lengths[-STABLE_CONTENT_STREAK:])) == 1:
             break
-        page.evaluate(f"() => window.scrollBy(0, {SCROLL_STEP_PX})")
+        page.evaluate(
+            f"""() => {{
+                const iframe = document.querySelector('iframe#innerWrap');
+                if (iframe && iframe.contentDocument && iframe.contentDocument.defaultView) {{
+                    iframe.contentDocument.defaultView.scrollBy(0, {SCROLL_STEP_PX});
+                }} else {{
+                    window.scrollBy(0, {SCROLL_STEP_PX});
+                }}
+            }}"""
+        )
         page.wait_for_timeout(200)
         total += SCROLL_STEP_PX
     else:
