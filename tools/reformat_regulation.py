@@ -30,15 +30,35 @@ _CHAPTER_RE = re.compile(r"^(제\d+장)\s+(.+)$")
 # 절(節): "제N절 제목" 독립 줄
 _SECTION_RE = re.compile(r"^(제\d+절)\s+(.+)$")
 
-# 조(條): 제N조(제목) 또는 제N조의M(제목)
-_ARTICLE_RE = re.compile(r"^(제\d+조(?:의\d+)?)\(([^)]+)\)(.*)")
+# 조(條): 제N조(제목) 또는 제N조의M(제목) — 조의 M 사이 공백 허용
+_ARTICLE_RE = re.compile(r"^(제\d+조(?:의\s*\d+)?)\(([^)]+)\)(.*)")
 
 # 부칙·별표·별지
 _APPENDIX_RE = re.compile(r"^(부칙|별표\s*\d*|별지\s*제?\d*\s*서식?)\s*(.*)")
 
 
+_TABLE_SEP_RE = re.compile(r"^\|[-| ]+\|$")
+
+
 def _is_noise(line: str) -> bool:
     return bool(_NOISE_RE.match(line))
+
+
+def _table_row_as_history(line: str) -> str | None:
+    """파이프 테이블 행이 이력 줄이면 평문으로 변환, 아니면 None.
+
+    parse_preview.py 가 날짜 내부 공백을 테이블 구분자로 오인할 때 발생.
+    예: `| 제정 1987. | 5. 15.(규정 제44호) |` → `제정 1987. 5. 15.(규정 제44호)`
+    """
+    if not line.startswith("|"):
+        return None
+    if _TABLE_SEP_RE.match(line.replace(" ", "")):
+        return None
+    cells = [c.strip() for c in line.strip("|").split("|") if c.strip()]
+    if not cells:
+        return None
+    text = re.sub(r"\s{2,}", " ", " ".join(cells))
+    return text if _HISTORY_RE.match(text) else None
 
 
 def reformat(raw: str, reg_name: str) -> str:
@@ -66,6 +86,14 @@ def reformat(raw: str, reg_name: str) -> str:
             continue
         if _HISTORY_RE.match(ln) or ln.startswith("[시행"):
             history.append(ln)
+            continue
+        # parse_preview.py 가 이력 줄을 테이블로 변환한 경우 복원
+        table_hist = _table_row_as_history(ln)
+        if table_hist is not None:
+            history.append(table_hist)
+            continue
+        # 테이블 구분자 행(---|---) 스킵 — 이력 테이블 내부
+        if _TABLE_SEP_RE.match(ln.replace(" ", "")):
             continue
         # 본문 시작 — i 를 한 칸 되돌림
         i -= 1
