@@ -18,9 +18,9 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 PREVIEW_URL = "https://www.knue.ac.kr/www/previewMenuCntFile.do?key=392&fileNo={file_no}"
 NAVIGATE_TIMEOUT_MS = 30_000
 POST_LOAD_WAIT_MS = 5_000
-MAX_SCROLL_PX = 50_000
+MAX_SCROLL_PX = 100_000
 SCROLL_STEP_PX = 800
-STABLE_HEIGHT_STREAK = 3
+STABLE_CONTENT_STREAK = 8  # consecutive same content-length readings before declaring done
 
 FULLWIDTH_DIGITS = "０１２３４５６７８９"
 H2_PREFIX_RE = re.compile(rf"^[{FULLWIDTH_DIGITS}]+\s+")
@@ -28,6 +28,9 @@ H1_BRACKET_RE = re.compile(r"^【(.+)】\s*$")
 HR_RE = re.compile(r"^=+$")
 BULLET_RE = re.compile(r"^[ㆍ‣○□]\s*")
 TABLE_SPLIT_RE = re.compile(r"\s{2,}")
+
+_TBL_START = "<<<TBL>>>"
+_TBL_END = "<<</TBL>>>"
 
 
 @dataclass
@@ -37,31 +40,122 @@ class ParseResult:
 
 
 def _extract_lines(page) -> list[str]:
-    """iframe#innerWrap > #content_body 에서 줄 배열을 뽑는다."""
+    """iframe#innerWrap > #content_body 에서 줄 배열을 뽑는다.
+
+    innerText 는 요소의 layout 범위(overflow 등)에 의존하므로 대신 DOM 을 직접
+    순회하여 블록 요소 경계마다 줄바꿈을 삽입한 뒤 전체 텍스트를 추출한다.
+
+    <table> 요소는 일반 블록 처리에서 제외하고 extractTable() 로 위임해
+    마크다운 표 구조를 보존한다. sentinel(<<<TBL>>>…<<</TBL>>>)로 감싸
+    convert_to_markdown() 에서 그대로 통과시킨다.
+    """
     text: str = page.evaluate(
         """() => {
+            const BLOCK_TAGS = new Set([
+                'P','DIV','LI','TR','TD','TH','CAPTION','ARTICLE','SECTION',
+                'HEADER','FOOTER','H1','H2','H3','H4','H5','H6',
+                'BLOCKQUOTE','PRE','THEAD','TBODY','TFOOT','BR',
+            ]);
+            function cellText(td) {
+                return (td.textContent || '').replace(/\\s+/g, ' ').trim().replace(/\\|/g, '\\\\|');
+            }
+            function collectRows(tbl) {
+                const rows = [];
+                for (const child of tbl.children) {
+                    const ct = (child.tagName || '').toUpperCase();
+                    if (ct === 'TR') {
+                        rows.push(child);
+                    } else if (ct === 'THEAD' || ct === 'TBODY' || ct === 'TFOOT') {
+                        for (const tr of child.children) {
+                            if ((tr.tagName || '').toUpperCase() === 'TR') rows.push(tr);
+                        }
+                    }
+                }
+                return rows;
+            }
+            function extractTable(table) {
+                const rows = collectRows(table);
+                if (!rows.length) return '';
+                const data = [];
+                for (const tr of rows) {
+                    const cells = [];
+                    for (const cell of tr.children) {
+                        const ct = (cell.tagName || '').toUpperCase();
+                        if (ct === 'TD' || ct === 'TH') {
+                            cells.push(cellText(cell));
+                        }
+                    }
+                    if (cells.length) data.push(cells);
+                }
+                if (!data.length) return '';
+                const cols = Math.max(...data.map(r => r.length));
+                const norm = data.map(r => [...r, ...Array(cols - r.length).fill('')]);
+                const mdLines = [];
+                mdLines.push('| ' + norm[0].join(' | ') + ' |');
+                mdLines.push('|' + Array(cols).fill('---').join('|') + '|');
+                for (const row of norm.slice(1)) {
+                    mdLines.push('| ' + row.join(' | ') + ' |');
+                }
+                return '\\n<<<TBL>>>\\n' + mdLines.join('\\n') + '\\n<<</TBL>>>\\n';
+            }
+            function walk(node) {
+                if (node.nodeType === 3) return node.nodeValue || '';
+                if (node.nodeType !== 1) return '';
+                const tag = (node.tagName || '').toUpperCase();
+                if (tag === 'SCRIPT' || tag === 'STYLE') return '';
+                if (tag === 'TABLE') return extractTable(node);
+                const isBlock = BLOCK_TAGS.has(tag);
+                let text = isBlock ? '\\n' : '';
+                for (const child of node.childNodes) text += walk(child);
+                if (isBlock) text += '\\n';
+                return text;
+            }
             const iframe = document.querySelector('iframe#innerWrap');
             if (!iframe) return '';
             const doc = iframe.contentDocument;
             if (!doc) return '';
             const body = doc.querySelector('#content_body');
             if (!body) return '';
-            return body.innerText || '';
+            return walk(body);
         }"""
     )
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
 def _scroll_to_bottom(page) -> None:
-    """끝까지 스크롤 — 3회 연속 높이 동일하거나 MAX_SCROLL_PX 초과 시 중단."""
-    last_heights: list[int] = []
+    """끝까지 스크롤해 lazy-load 콘텐츠를 모두 가져온다.
+
+    scrollHeight 대신 #content_body 텍스트 길이로 안정성을 판단한다.
+    scrollHeight 는 lazy-load 트리거 전 초기 상태에서도 변하지 않아 조기 종료를
+    유발하지만, 텍스트 길이는 실제로 새 콘텐츠가 추가될 때만 변한다.
+    """
+    last_lengths: list[int] = []
     total = 0
     while total < MAX_SCROLL_PX:
-        height: int = page.evaluate("() => document.body.scrollHeight")
-        last_heights.append(height)
-        if len(last_heights) >= STABLE_HEIGHT_STREAK and len(set(last_heights[-STABLE_HEIGHT_STREAK:])) == 1:
+        content_len: int = page.evaluate(
+            """() => {
+                const iframe = document.querySelector('iframe#innerWrap');
+                if (iframe && iframe.contentDocument) {
+                    const body = iframe.contentDocument.querySelector('#content_body');
+                    if (body) return body.textContent.length;
+                    return iframe.contentDocument.body.textContent.length;
+                }
+                return document.body.textContent.length;
+            }"""
+        )
+        last_lengths.append(content_len)
+        if len(last_lengths) >= STABLE_CONTENT_STREAK and len(set(last_lengths[-STABLE_CONTENT_STREAK:])) == 1:
             break
-        page.evaluate(f"() => window.scrollBy(0, {SCROLL_STEP_PX})")
+        page.evaluate(
+            f"""() => {{
+                const iframe = document.querySelector('iframe#innerWrap');
+                if (iframe && iframe.contentDocument && iframe.contentDocument.defaultView) {{
+                    iframe.contentDocument.defaultView.scrollBy(0, {SCROLL_STEP_PX});
+                }} else {{
+                    window.scrollBy(0, {SCROLL_STEP_PX});
+                }}
+            }}"""
+        )
         page.wait_for_timeout(200)
         total += SCROLL_STEP_PX
     else:
@@ -75,7 +169,10 @@ def _flush_table(buffer: list[list[str]], out: list[str]) -> None:
     if not buffer:
         return
     cols = max(len(row) for row in buffer)
-    if cols < 2 or len(buffer) < 2:
+    # Require 2+ cols, 2+ rows, and uniform column count to prevent false positives
+    # from whitespace-padded plain text (e.g. kerned Korean department names).
+    all_same_cols = all(len(row) == cols for row in buffer)
+    if cols < 2 or len(buffer) < 2 or not all_same_cols:
         for row in buffer:
             out.append(" ".join(row))
         buffer.clear()
@@ -91,10 +188,34 @@ def _flush_table(buffer: list[list[str]], out: list[str]) -> None:
 
 def convert_to_markdown(lines: list[str]) -> str:
     """중간 마크다운 생성. AI 재포맷 전의 raw 형태."""
+    # Pre-pass: reassemble HTML-extracted table blocks (sentinel <<<TBL>>> … <<</TBL>>>)
+    # into list objects so the main loop can emit them verbatim without heuristic interference.
+    coalesced: list[str | list[str]] = []
+    in_tbl = False
+    tbl_lines: list[str] = []
+    for line in lines:
+        if line == _TBL_START:
+            in_tbl = True
+            tbl_lines = []
+        elif line == _TBL_END:
+            in_tbl = False
+            if tbl_lines:
+                coalesced.append(tbl_lines[:])
+        elif in_tbl:
+            tbl_lines.append(line)
+        else:
+            coalesced.append(line)
+
     out: list[str] = []
     table_buf: list[list[str]] = []
 
-    for raw in lines:
+    for item in coalesced:
+        if isinstance(item, list):
+            _flush_table(table_buf, out)
+            out.extend(item)
+            continue
+
+        raw: str = item
         if TABLE_SPLIT_RE.search(raw) and not H1_BRACKET_RE.match(raw) and not H2_PREFIX_RE.match(raw):
             table_buf.append([c.strip() for c in TABLE_SPLIT_RE.split(raw) if c.strip()])
             continue
