@@ -36,7 +36,7 @@ DATE=$(date +%Y-%m-%d)
 git switch -c "regulation-sync/$DATE" 2>/dev/null || git switch "regulation-sync/$DATE"
 # CI가 origin/main에 regulations.json을 이미 업데이트했으므로 rebase 필수
 git fetch origin main
-git rebase origin/main
+git rebase origin/main || { git rebase --abort; echo 'Rebase conflict — resolve manually then re-run skill'; exit 1; }
 ```
 
 ### 2. 이슈 수집

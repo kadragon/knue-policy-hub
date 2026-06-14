@@ -60,7 +60,7 @@ Expected structure after `reformat_regulation.py`:
 - Enforcement history lines (공포/개정) before `---` divider
 - `## 제N장` for chapters, `## 제N절` for sections
 - `## 제N조(조문제목)` or `### 제N조(조문제목)` for articles (three `#` when chapters exist)
-- `## 부칙`, `## 별표`, etc. for appendices
+- `## 부칙`, `## 별표`, etc. for appendices (`### 부칙` etc. when chapters exist, matching article level)
 
 Quality gate: first line starts with `# <REG_NAME>`, file ≥ 500 chars, at least one `## ` header.
 
