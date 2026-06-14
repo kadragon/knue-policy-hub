@@ -1,6 +1,6 @@
 ---
 name: update-regulations
-description: regulation-update 라벨의 열린 GitHub 이슈를 일괄 소비하여 규정 파일과 tools/regulations.json 을 싱크한다. parse_preview.py + reformat_regulation.py 로 미리보기 원문을 저장소 양식으로 변환한다. "규정 업데이트", "regulation 이슈 처리", "KNUE 규정 싱크", "regulation-update 반영" 같은 요청에 트리거.
+description: 'This skill should be used when the user asks to "규정 업데이트", "regulation 이슈 처리", "KNUE 규정 싱크", "regulation-update 반영", or wants to process open GitHub issues with the regulation-update label. Syncs KNUE regulation markdown files and tools/regulations.json using parse_preview.py + reformat_regulation.py.'
 ---
 
 # update-regulations
@@ -34,6 +34,9 @@ gh auth status
 ```bash
 DATE=$(date +%Y-%m-%d)
 git switch -c "regulation-sync/$DATE" 2>/dev/null || git switch "regulation-sync/$DATE"
+# CI가 origin/main에 regulations.json을 이미 업데이트했으므로 rebase 필수
+git fetch origin main
+git rebase origin/main || { git rebase --abort; echo 'Rebase conflict — resolve manually then re-run skill'; exit 1; }
 ```
 
 ### 2. 이슈 수집
@@ -150,7 +153,7 @@ PR/이슈 닫기는 수동. 커밋 메시지에 `closes #N` 이 있어 PR 머지
 
 - **파싱 실패(본문 0줄)**: `parse_preview.py` 가 exit 1 — 해당 이슈만 스킵.
 - **재정렬 품질 미달**: 위 점검 기준 중 하나 이상 실패 — 파일 원복 + 스킵.
-- **변경 이슈에서 `file_no == <new_fno>` 엔트리 부재**: 주간 워크플로(`--update` 단계)가 아직 안 돌았거나 실패함 — 사용자에게 워크플로를 먼저 돌리라고 안내.
+- **변경 이슈에서 `file_no == <new_fno>` 엔트리 부재**: 로컬 브랜치가 `origin/main`보다 뒤처진 경우가 대부분. `git fetch origin main && git rebase origin/main` 실행 후 재시도. 그래도 없으면 주간 워크플로(`--update` 단계)가 아직 안 돌았거나 실패한 것 — 사용자에게 안내.
 
 ## 관련 파일
 
