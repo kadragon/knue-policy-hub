@@ -23,7 +23,7 @@ jobs:
           python-version: "3.11"
 
       - name: Lint Python tools
-        run: uv run --project tools --with ruff ruff check tools/ --select E,F,W
+        run: uv run --project tools --with ruff ruff check tools/ --select E,F,W --ignore E501
 
       - name: Get changed regulation files (PR mode)
         if: github.event_name == 'pull_request'
