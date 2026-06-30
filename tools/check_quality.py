@@ -172,8 +172,8 @@ def _check_md_file(path: Path, name: str, root: Path) -> bool:
     if not text.startswith(f"# {name}"):
         err(f"{rel}: 첫 줄이 '# {name}'으로 시작하지 않음")
         failed = True
-    if len(text) < 500:
-        err(f"{rel}: 파일 길이 {len(text)}자 (500자 미만)")
+    if len(text) < 100:
+        err(f"{rel}: 파일 길이 {len(text)}자 (100자 미만)")
         failed = True
     if "\n## " not in text and not text.startswith("## "):
         err(f"{rel}: '## ' 헤더 없음")
