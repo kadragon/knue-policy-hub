@@ -1,0 +1,50 @@
+name: Regulation Quality
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Full check (all files, not just changed)'
+        type: boolean
+        default: false
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: Lint Python tools
+        run: uv run --project tools --with ruff ruff check tools/ --select E,F,W
+
+      - name: Get changed regulation files (PR mode)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git -c core.quotepath=false diff --name-only \
+            "origin/${BASE_REF}...HEAD" -- '규정/*.md' \
+            > /tmp/changed_files.txt
+          echo "--- changed files ---"
+          cat /tmp/changed_files.txt
+
+      - name: Quality check (PR — changed files only)
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ ! -s /tmp/changed_files.txt ]; then
+            echo "변경된 규정 파일 없음 — 스킵"
+          else
+            python tools/check_quality.py --files-from /tmp/changed_files.txt
+          fi
+
+      - name: Quality check (full)
+        if: github.event_name == 'workflow_dispatch'
+        run: python tools/check_quality.py
