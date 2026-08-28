@@ -190,10 +190,13 @@ def apply_updates(
 
     # 신규 규정 추가
     for n in new:
+        # domain/audience는 빈 값으로 시딩 — check_quality.py가 태그 누락을 잡는다
         regulations.append({
             "name": n["name"],
             "file_no": n["file_no"],
             "section": "",
+            "domain": "",
+            "audience": [],
             "local_path": None,
         })
 

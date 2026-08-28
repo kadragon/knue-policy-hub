@@ -10,6 +10,8 @@ import json
 import sys
 from pathlib import Path
 
+from taxonomy import AUDIENCE_SET, DOMAIN_SET
+
 ROOT = Path(__file__).parent.parent
 REGULATIONS_JSON = ROOT / "tools" / "regulations.json"
 REG_DIR = ROOT / "규정"
@@ -92,6 +94,8 @@ def _check_json_integrity(
             err(f"name={name!r}: file_no 누락")
         if not section:
             err(f"name={name!r}: section 비어 있음 (미완성 엔트리)")
+        _check_taxonomy(reg, name)
+
         if not local_path:
             err(f"name={name!r}: local_path null/비어 있음 (미완성 엔트리)")
             continue
@@ -107,6 +111,23 @@ def _check_json_integrity(
             err(f"{local_path}: 파일 없음 (JSON 등록됐으나 md 미생성)")
 
     ok(f"{len(regulations)}개 엔트리 검사 완료")
+
+
+def _check_taxonomy(reg: dict, name: str) -> None:
+    """domain/audience 2축 태그 검증 (tools/taxonomy.py 어휘 기준)."""
+    domain = reg.get("domain")
+    if not domain:
+        err(f"name={name!r}: domain 누락 — tools/taxonomy.py DOMAINS 중 하나를 지정")
+    elif domain not in DOMAIN_SET:
+        err(f"name={name!r}: domain={domain!r} 은 정의되지 않은 값")
+
+    audience = reg.get("audience")
+    if not isinstance(audience, list) or not audience:
+        err(f"name={name!r}: audience 누락 — tools/taxonomy.py AUDIENCES에서 1개 이상 지정")
+        return
+    for a in audience:
+        if a not in AUDIENCE_SET:
+            err(f"name={name!r}: audience={a!r} 은 정의되지 않은 값")
 
 
 def _check_unregistered_files(registered_paths: set[Path]) -> None:

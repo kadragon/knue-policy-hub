@@ -35,9 +35,18 @@ To process pending GitHub issues from the weekly workflow, use the `/update-regu
 `tools/regulations.json` has three top-level keys:
 - `source_url` — KNUE website to scrape
 - `last_checked` — ISO timestamp of last check
-- `regulations` — array of `{ name, file_no, section, local_path }`
+- `regulations` — array of `{ name, file_no, section, domain, audience, local_path }`
 
 `local_path` maps to `규정/<section>/<name>.md`. `section` follows the `제N편/제N장` hierarchy.
+
+`section` is the official codebook hierarchy and does not track who a regulation binds or
+which office owns it, so two orthogonal tags are stored alongside it:
+- `domain` — single business area (학사·교육과정, 연구·산학, 교원인사, …)
+- `audience` — one or more bound parties (학부생, 대학원생, 전임교원, 교직원, …)
+
+Allowed values live in `tools/taxonomy.py` (`DOMAINS` / `AUDIENCES`) — the single source of
+truth. `check_quality.py` fails on a missing or off-vocabulary tag, and `check_updates.py`
+seeds new entries with empty tags so the gate catches them.
 
 ### Regulation Update Pipeline
 
@@ -71,6 +80,8 @@ Quality gate: first line starts with `# <REG_NAME>`, file ≥ 500 chars, at leas
 | `tools/check_updates.py` | Scrapes KNUE site, diffs against `regulations.json`, optionally applies changes |
 | `tools/parse_preview.py` | Playwright headless scraper: preview URL → RAW markdown |
 | `tools/reformat_regulation.py` | Rule-based RAW → repository format converter |
+| `tools/taxonomy.py` | `domain`/`audience` allowed-value vocabulary (SSOT) |
+| `tools/check_quality.py` | JSON integrity + taxonomy + markdown quality gate (CI) |
 
 ## Branching
 

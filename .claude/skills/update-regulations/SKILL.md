@@ -56,7 +56,7 @@ gh issue list --label regulation-update --state open --limit 200 \
 > **중요 — regulations.json 선(先)갱신 상태**  
 > 이슈를 만드는 주간 워크플로(`check-regulation-updates.yml`)는 이슈 생성 **직후** `tools/check_updates.py --update` 를 돌려 `tools/regulations.json` 을 이미 갱신하고 커밋한다. 따라서 이 스킬이 실행될 시점에는:  
 > - **변경 이슈**: 엔트리의 `file_no` 는 이미 `새 fileNo` 로 바뀌어 있다(그 외 필드 `name`/`section`/`local_path` 는 유지). 마크다운 파일만 아직 구버전이다.  
-> - **신규 이슈**: 엔트리가 이미 추가돼 있으며 `section=""`, `local_path=null`. 마크다운 파일은 없다. 이 스킬이 `section` 을 결정해 채우고 파일을 생성한다.  
+> - **신규 이슈**: 엔트리가 이미 추가돼 있으며 `section=""`, `domain=""`, `audience=[]`, `local_path=null`. 마크다운 파일은 없다. 이 스킬이 `section`/`domain`/`audience` 를 결정해 채우고 파일을 생성한다.  
 > - **삭제 이슈**: 엔트리는 이미 제거됐다. 마크다운 파일만 남아 있을 수 있다. 이슈 body 의 `규정명 + 분류` 로 `규정/<section>/<name>.md` 를 역산해 삭제한다.
 
 ### 3. 삭제 이슈 처리 (per issue)
@@ -112,11 +112,16 @@ git commit -m "[FIX] 규정 갱신: <name> (fileNo=<new_fno>, closes #<N>)"
      --reg-name "<name>" \
      --out "<DEST>"
    ```
-5. 품질 점검 통과 시 `regulations.json` 의 `file_no == <fno>` 엔트리를 갱신(Edit 툴):
+5. **분류 태그 결정**: 규정 제1조(목적)·제2조(적용범위)를 읽고 `tools/taxonomy.py` 의 `DOMAINS` 에서 `domain` 1개, `AUDIENCES` 에서 `audience` 1개 이상을 고른다. 어휘에 없는 값을 쓰면 `check_quality.py` 가 실패한다.
+6. 품질 점검 통과 시 `regulations.json` 의 `file_no == <fno>` 엔트리를 갱신(Edit 툴):
    ```json
-   { "name": "<name>", "file_no": <fno>, "section": "<section>", "local_path": "규정/<section>/<name>.md" }
+   {
+     "name": "<name>", "file_no": <fno>, "section": "<section>",
+     "domain": "<domain>", "audience": ["<audience>", ...],
+     "local_path": "규정/<section>/<name>.md"
+   }
    ```
-6. 커밋:
+7. 커밋:
    ```bash
    git add tools/regulations.json -- "$DEST"
    git commit -m "[FEAT] 신규 규정: <name> (fileNo=<fno>, closes #<N>)"
@@ -159,5 +164,6 @@ PR/이슈 닫기는 수동. 커밋 메시지에 `closes #N` 이 있어 PR 머지
 
 - `tools/parse_preview.py` — 미리보기 → RAW 마크다운
 - `tools/reformat_regulation.py` — RAW → 저장소 양식 (규칙 기반, 파일 길이 무관)
-- `tools/regulations.json` — 규정 인덱스(name/file_no/section/local_path)
+- `tools/regulations.json` — 규정 인덱스(name/file_no/section/domain/audience/local_path)
+- `tools/taxonomy.py` — `domain`(업무영역)/`audience`(적용대상) 허용 어휘 SSOT
 - `tools/check_updates.py` — fileNo 변동 감지(주간 워크플로용, 이 스킬이 호출하지는 않음)
