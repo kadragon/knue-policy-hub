@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import re
 import sys
@@ -56,6 +57,28 @@ def fetch_web_regulations(source_url: str) -> dict[int, str]:
             results[file_no] = name
 
     return results
+
+
+def warn_duplicate_titles(web: dict[int, str]) -> list[str]:
+    """같은 이름으로 노출된 fileNo 를 경고한다.
+
+    웹 목록의 `title` 속성이 앞 항목 이름으로 잘못 붙는 사례가 있다(예: fileNo
+    1596 은 실제로는 「교수회 규정」이지만 title 은 「교수회평의회 규정」).
+    이름만 믿고 신규 등록하면 기존 규정 파일을 덮어쓰게 되므로, 중복 이름은
+    미리보기 본문으로 실제 규정명을 확인해야 한다.
+    """
+    by_name: dict[str, list[int]] = collections.defaultdict(list)
+    for fno, name in web.items():
+        by_name[name].append(fno)
+
+    dups = {n: sorted(f) for n, f in by_name.items() if len(f) > 1}
+    for name, fnos in sorted(dups.items()):
+        print(
+            f"경고: '{name}' 이 fileNo {fnos} 로 중복 노출됨 — "
+            "웹 목록 title 오류 가능. parse_preview.py 로 실제 규정명 확인 필요.",
+            file=sys.stderr,
+        )
+    return sorted(dups)
 
 
 def compare(
@@ -158,6 +181,7 @@ def print_json_report(
     removed: list[dict],
     web_count: int,
     stored_count: int,
+    duplicate_titles: list[str] | None = None,
 ) -> None:
     report = {
         "web_count": web_count,
@@ -165,6 +189,7 @@ def print_json_report(
         "changed": changed,
         "new": new,
         "removed": removed,
+        "duplicate_titles": duplicate_titles or [],
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
@@ -238,10 +263,14 @@ def main() -> None:
         )
         sys.exit(1)
 
+    duplicate_titles = warn_duplicate_titles(web)
+
     changed, new, removed = compare(stored, web)
 
     if args.json_output:
-        print_json_report(changed, new, removed, len(web), len(stored))
+        print_json_report(
+            changed, new, removed, len(web), len(stored), duplicate_titles
+        )
     else:
         print_text_report(changed, new, removed, len(web), len(stored))
 

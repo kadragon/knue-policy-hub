@@ -7,6 +7,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -17,6 +18,16 @@ REGULATIONS_JSON = ROOT / "tools" / "regulations.json"
 REG_DIR = ROOT / "규정"
 
 ERRORS: list[str] = []
+
+# 본문에 남은 "규정 정식명" 줄. parse_preview.py 가 넘긴 원문 제목이
+# regulations.json 의 이름과 다르면 엉뚱한 fileNo 를 파싱했다는 신호다.
+_TITLE_LINE_RE = re.compile(
+    r"^(한국교원대학교\s*\S.*?(?:규정|규칙|학칙|정관|행동강령|권리장전|설치령))$"
+)
+
+
+def _norm(name: str) -> str:
+    return name.replace(" ", "")
 
 
 def err(msg: str) -> None:
@@ -54,8 +65,8 @@ def main() -> None:
     regulations: list[dict] = data["regulations"]
 
     # name lookup by absolute path
-    path_to_name: dict[Path, str] = {
-        ROOT / r["local_path"]: r["name"]
+    path_to_name: dict[Path, tuple[str, str | None]] = {
+        ROOT / r["local_path"]: (r["name"], r.get("official_name"))
         for r in regulations
         if r.get("local_path")
     }
@@ -150,7 +161,7 @@ def _check_all_markdown(regulations: list[dict], root: Path) -> None:
         path = root / reg["local_path"]
         if not path.exists():
             continue
-        if _check_md_file(path, reg["name"], root):
+        if _check_md_file(path, reg["name"], root, reg.get("official_name")):
             fail_count += 1
     if fail_count == 0:
         ok(f"{len(regulations)}개 파일 품질 통과")
@@ -158,7 +169,7 @@ def _check_all_markdown(regulations: list[dict], root: Path) -> None:
 
 def _check_pr_files(
     files: list[str],
-    path_to_name: dict[Path, str],
+    path_to_name: dict[Path, tuple[str, str | None]],
     registered_paths: set[Path],
     root: Path,
 ) -> None:
@@ -176,19 +187,24 @@ def _check_pr_files(
             err(f"{path.relative_to(root)}: regulations.json 미등록")
             fail_count += 1
             continue
-        name = path_to_name[path]
-        if _check_md_file(path, name, root):
+        name, official_name = path_to_name[path]
+        if _check_md_file(path, name, root, official_name):
             fail_count += 1
 
     if fail_count == 0:
         ok("모든 변경 파일 품질 통과")
 
 
-def _check_md_file(path: Path, name: str, root: Path) -> bool:
+def _check_md_file(
+    path: Path, name: str, root: Path, official_name: str | None = None
+) -> bool:
     """Returns True if any check failed."""
     rel = path.relative_to(root)
     text = path.read_text(encoding="utf-8")
     failed = False
+
+    if _check_body_title(rel, text, official_name or name):
+        failed = True
 
     if not text.startswith(f"# {name}"):
         err(f"{rel}: 첫 줄이 '# {name}'으로 시작하지 않음")
@@ -205,6 +221,29 @@ def _check_md_file(path: Path, name: str, root: Path) -> bool:
         failed = True
 
     return failed
+
+
+def _check_body_title(rel: Path, text: str, expected: str) -> bool:
+    """본문에 남은 규정 정식명이 기대 이름과 다른지 검사.
+
+    첫 줄(`# <name>`)은 스킬이 직접 써 넣으므로 오파싱을 잡지 못한다.
+    파서가 원문에서 넘긴 제목 줄이 실제 문서의 신원이다.
+    """
+    want = _norm(expected)
+    for i, line in enumerate(text.split("\n")[1:], start=2):
+        found = line.strip()
+        if not _TITLE_LINE_RE.match(found):
+            continue
+        got = _norm(found)
+        if got == want or got in want or want in got:
+            continue
+        err(
+            f"{rel}:{i}: 본문 규정명 {found!r} 이 {expected!r} 과 불일치 "
+            "— 다른 fileNo 를 파싱했거나 regulations.json 의 name 이 틀렸을 수 있음 "
+            "(정식명이 목록명과 다른 규정은 official_name 필드로 명시)"
+        )
+        return True
+    return False
 
 
 if __name__ == "__main__":

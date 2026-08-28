@@ -33,8 +33,8 @@ _SECTION_RE = re.compile(r"^(제\d+절)\s+(.+)$")
 # 조(條): 제N조(제목) 또는 제N조의M(제목) — 조의 M 사이 공백 허용
 _ARTICLE_RE = re.compile(r"^(제\d+조(?:의\s*\d+)?)\(([^)]+)\)(.*)")
 
-# 부칙·별표·별지
-_APPENDIX_RE = re.compile(r"^(부칙|별표\s*\d*|별지\s*제?\d*\s*서식?)\s*(.*)")
+# 부칙·별표·별지 — 원문이 "부 칙" 처럼 사이 공백을 두는 경우가 있다
+_APPENDIX_RE = re.compile(r"^(부\s*칙|별표\s*\d*|별지\s*제?\d*\s*서식?)\s*(.*)")
 
 
 _TABLE_SEP_RE = re.compile(r"^\|[-| ]+\|$")
@@ -66,7 +66,8 @@ def reformat(raw: str, reg_name: str) -> str:
 
     # 장(章) 존재 여부에 따라 조문 헤더 레벨 결정
     has_chapters = any(_CHAPTER_RE.match(ln.strip()) for ln in lines)
-    art_level = "###" if has_chapters else "##"
+    base_art_level = "###" if has_chapters else "##"
+    art_level = base_art_level
 
     out: list[str] = []
 
@@ -169,13 +170,21 @@ def reformat(raw: str, reg_name: str) -> str:
         # 부칙·별표·별지
         m = _APPENDIX_RE.match(ln)
         if m:
-            name = m.group(1).strip()
+            name = re.sub(r"\s+", "", m.group(1))
             rest = m.group(2).strip()
             _push_blank(out)
-            out.append(f"{art_level} {name}")
-            if rest:
-                out.append("")
-                out.append(rest)
+            # 부칙·별표 헤더는 언제나 조문 기준 레벨을 유지한다
+            # "부칙(규정 제608호, 2016. 10. 7.)" 처럼 공포 정보는 헤더에 붙인다
+            if rest.startswith("("):
+                out.append(f"{base_art_level} {name}{rest}")
+            else:
+                out.append(f"{base_art_level} {name}")
+                if rest:
+                    out.append("")
+                    out.append(rest)
+            # 이후의 조문은 부칙에 속하므로 한 단계 아래로 내린다
+            if name == "부칙":
+                art_level = "#" + base_art_level
             continue
 
         # 일반 줄(항·호·표 포함) — 원본 그대로

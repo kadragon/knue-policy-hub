@@ -102,6 +102,7 @@ git commit -m "[FIX] 규정 갱신: <name> (fileNo=<new_fno>, closes #<N>)"
 
 이슈 body 에서 `fileNo(<fno>)`, `규정명(<name>)` 추출.
 
+0. **규정명 검증**: `parse_preview.py --file-no <fno>` 출력 **첫 줄**이 이슈의 `<name>` 과 일치하는지 먼저 확인한다. 웹 목록의 `title` 속성은 앞 항목 이름이 잘못 붙는 경우가 있어(예: fileNo 1596 = 실제 「교수회 규정」, 목록은 「교수회평의회 규정」) 그대로 믿으면 **기존 규정 파일을 덮어쓴다**. 불일치하면 본문 첫 줄을 정본으로 삼아 `regulations.json` 의 `name` 을 정정하고 사용자에게 보고한다.
 1. **section 결정**: AskUserQuestion 으로 편/장 선택(기존 `regulations.json` 의 `section` 값 후보 + 직접 입력).
 2. 대상 경로 `DEST="규정/<section>/<name>.md"`. 이미 존재하면 스킵(사용자에게 보고).
 3. 파싱: `parse_preview.py --file-no <fno>` → `/tmp/raw_<fno>.md`
