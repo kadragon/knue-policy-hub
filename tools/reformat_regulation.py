@@ -33,8 +33,11 @@ _SECTION_RE = re.compile(r"^(제\d+절)\s+(.+)$")
 # 조(條): 제N조(제목) 또는 제N조의M(제목) — 조의 M 사이 공백 허용
 _ARTICLE_RE = re.compile(r"^(제\d+조(?:의\s*\d+)?)\(([^)]+)\)(.*)")
 
-# 부칙·별표·별지 — 원문이 "부 칙" 처럼 사이 공백을 두는 경우가 있다
-_APPENDIX_RE = re.compile(r"^(부\s*칙|별표\s*\d*|별지\s*제?\d*\s*서식?)\s*(.*)")
+# 부칙·별표·별지 — 원문이 "부 칙" 처럼 사이 공백을 두거나
+# "[별표]" 처럼 대괄호로 감싸는 경우가 있다
+_APPENDIX_RE = re.compile(
+    r"^\[?(부\s*칙|별표\s*\d*|별지(?:\s*제\s*\d+\s*호?)?\s*서식?)\]?\s*(.*)"
+)
 
 
 _TABLE_SEP_RE = re.compile(r"^\|[-| ]+\|$")
@@ -61,7 +64,21 @@ def _table_row_as_history(line: str) -> str | None:
     return text if _HISTORY_RE.match(text) else None
 
 
+# 원문이 쓰는 유사 문자 → 저장소 표준 문자.
+# check_quality.py 가 U+2024 를 오류로 잡으므로 변환 단계에서 정규화한다.
+_CHAR_FIXES = {
+    "\u2024": "\u00b7",  # ONE DOT LEADER → MIDDLE DOT
+}
+
+
+def _normalize_chars(text: str) -> str:
+    for bad, good in _CHAR_FIXES.items():
+        text = text.replace(bad, good)
+    return text
+
+
 def reformat(raw: str, reg_name: str) -> str:
+    raw = _normalize_chars(raw)
     lines = [ln.rstrip() for ln in raw.splitlines()]
 
     # 장(章) 존재 여부에 따라 조문 헤더 레벨 결정
