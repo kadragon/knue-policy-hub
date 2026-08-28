@@ -94,6 +94,11 @@ Quality gate: first line starts with `# <REG_NAME>`, file ≥ 500 chars, at leas
 | `tools/taxonomy.py` | `domain`/`audience` allowed-value vocabulary (SSOT) |
 | `tools/check_quality.py` | JSON integrity + taxonomy + markdown quality gate + agent-prompt axis sync (CI) |
 
+`check_quality.py` has two modes: PR mode (`--files`/`--files-from`, what CI runs on pull
+requests) checks only the listed markdown files. Whole-repo checks — JSON integrity, taxonomy,
+agent-prompt axis sync — must be called *outside* the `if not pr_mode:` branch, or they never
+run in CI at all.
+
 ## Docs
 
 | File | Role |

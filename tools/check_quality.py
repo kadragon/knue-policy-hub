@@ -77,8 +77,11 @@ def main() -> None:
     }
     registered_paths: set[Path] = set(path_to_name.keys())
 
+    # JSON 무결성(=taxonomy 태그 검증)은 규정 md 변경 여부와 무관하므로
+    # PR 모드에서도 검사한다 — 봇이 시딩한 빈 태그를 잡는 유일한 경로다
+    _check_json_integrity(regulations, registered_paths)
+
     if not pr_mode:
-        _check_json_integrity(regulations, registered_paths)
         _check_unregistered_files(registered_paths)
         _check_all_markdown(regulations, ROOT)
     else:
@@ -290,7 +293,10 @@ def _check_body_title(rel: Path, text: str, expected: str) -> bool:
         if not _TITLE_LINE_RE.match(found):
             continue
         got = _norm(found)
-        if got == want or got in want or want in got:
+        # 부분일치를 허용하면 「…규정」으로 등록된 자리에 「…규정 시행세칙」을
+        # 파싱해도 통과한다 — 이 검사가 잡아야 할 바로 그 오파싱이다.
+        # 목록명과 정식명이 다른 규정은 official_name 으로 맞춘다.
+        if got == want:
             continue
         err(
             f"{rel}:{i}: 본문 규정명 {found!r} 이 {expected!r} 과 불일치 "

@@ -59,7 +59,7 @@ def fetch_web_regulations(source_url: str) -> dict[int, str]:
     return results
 
 
-def warn_duplicate_titles(web: dict[int, str]) -> list[str]:
+def warn_duplicate_titles(web: dict[int, str]) -> dict[str, list[int]]:
     """같은 이름으로 노출된 fileNo 를 경고한다.
 
     웹 목록의 `title` 속성이 앞 항목 이름으로 잘못 붙는 사례가 있다(예: fileNo
@@ -78,7 +78,7 @@ def warn_duplicate_titles(web: dict[int, str]) -> list[str]:
             "웹 목록 title 오류 가능. parse_preview.py 로 실제 규정명 확인 필요.",
             file=sys.stderr,
         )
-    return sorted(dups)
+    return dups
 
 
 def compare(
@@ -181,7 +181,7 @@ def print_json_report(
     removed: list[dict],
     web_count: int,
     stored_count: int,
-    duplicate_titles: list[str] | None = None,
+    duplicate_titles: dict[str, list[int]] | None = None,
 ) -> None:
     report = {
         "web_count": web_count,
@@ -189,7 +189,7 @@ def print_json_report(
         "changed": changed,
         "new": new,
         "removed": removed,
-        "duplicate_titles": duplicate_titles or [],
+        "duplicate_titles": duplicate_titles or {},
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
