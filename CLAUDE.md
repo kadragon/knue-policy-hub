@@ -92,7 +92,7 @@ Quality gate: first line starts with `# <REG_NAME>`, file ≥ 500 chars, at leas
 | `tools/parse_preview.py` | Playwright headless scraper: preview URL → RAW markdown |
 | `tools/reformat_regulation.py` | Rule-based RAW → repository format converter |
 | `tools/taxonomy.py` | `domain`/`audience` allowed-value vocabulary (SSOT) |
-| `tools/check_quality.py` | JSON integrity + taxonomy + markdown quality gate (CI) |
+| `tools/check_quality.py` | JSON integrity + taxonomy + markdown quality gate + agent-prompt axis sync (CI) |
 
 ## Docs
 

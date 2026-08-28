@@ -11,11 +11,12 @@ import re
 import sys
 from pathlib import Path
 
-from taxonomy import AUDIENCE_SET, DOMAIN_SET
+from taxonomy import AUDIENCE_SET, AUDIENCES, DOMAIN_SET, DOMAINS
 
 ROOT = Path(__file__).parent.parent
 REGULATIONS_JSON = ROOT / "tools" / "regulations.json"
 REG_DIR = ROOT / "규정"
+AGENT_PROMPT = ROOT / "docs" / "rag-agent-prompt.md"
 
 ERRORS: list[str] = []
 
@@ -83,12 +84,55 @@ def main() -> None:
     else:
         _check_pr_files(file_list or [], path_to_name, registered_paths, ROOT)
 
+    # 축 어휘 동기화는 규정 md 변경 여부와 무관하므로 두 모드 모두에서 검사한다
+    _check_agent_prompt_axes()
+
     print()
     if ERRORS:
         print(f"❌ {len(ERRORS)}개 오류 발견")
         sys.exit(1)
     else:
         print("✅ 모든 검사 통과")
+
+
+def _check_agent_prompt_axes() -> None:
+    """docs/rag-agent-prompt.md 에 박힌 축 어휘 사본이 taxonomy.py 와 같은지 검사.
+
+    프롬프트는 저장소 밖(운영 사이트)에 배포되므로 어휘를 인라인으로 싣는다.
+    taxonomy.py 를 고치고 프롬프트를 잊으면 라우팅 지시와 메타 태그가 어긋난다.
+    """
+    print("\n[4] 에이전트 프롬프트 축 어휘 동기화")
+    if not AGENT_PROMPT.exists():
+        ok(f"{AGENT_PROMPT.name} 없음 — 건너뜀")
+        return
+
+    text = AGENT_PROMPT.read_text(encoding="utf-8")
+    for heading, vocabulary, label in (
+        ("# 축 1 — 업무영역", DOMAINS, "축 1(DOMAINS)"),
+        ("# 축 2 — 적용대상", AUDIENCES, "축 2(AUDIENCES)"),
+    ):
+        if heading not in text:
+            err(f"{AGENT_PROMPT.name}: '{heading}' 절을 찾을 수 없음")
+            continue
+        # 헤딩 다음의 첫 값 문단(" / " 구분) 만 읽는다
+        listed: set[str] = set()
+        for para in text.split(heading, 1)[1].split("\n\n"):
+            para = para.strip()
+            if para and not para.startswith("-") and "/" in para:
+                listed = {v.strip() for v in para.replace("\n", " ").split("/") if v.strip()}
+                break
+        expected = set(vocabulary)
+        missing = sorted(expected - listed)
+        extra = sorted(listed - expected)
+        if missing or extra:
+            detail = []
+            if missing:
+                detail.append(f"누락 {missing}")
+            if extra:
+                detail.append(f"초과 {extra}")
+            err(f"{AGENT_PROMPT.name} {label}: taxonomy.py 와 불일치 — {', '.join(detail)}")
+        else:
+            ok(f"{label} {len(expected)}개 일치")
 
 
 def _check_json_integrity(

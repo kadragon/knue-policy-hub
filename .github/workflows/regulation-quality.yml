@@ -40,7 +40,8 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           if [ ! -s /tmp/changed_files.txt ]; then
-            echo "변경된 규정 파일 없음 — 스킵"
+            echo "변경된 규정 파일 없음 — 축 어휘 동기화만 검사"
+            python tools/check_quality.py --files
           else
             python tools/check_quality.py --files-from /tmp/changed_files.txt
           fi
