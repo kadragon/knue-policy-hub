@@ -26,6 +26,10 @@ _TITLE_LINE_RE = re.compile(
 )
 
 
+# 헤더로 승격되지 못하고 평문으로 남은 부칙 줄
+_PLAIN_APPENDIX_RE = re.compile(r"^부\s*칙\s*(\(.*\))?\s*$", re.MULTILINE)
+
+
 def _norm(name: str) -> str:
     return name.replace(" ", "")
 
@@ -214,6 +218,13 @@ def _check_md_file(
         failed = True
     if "\n## " not in text and not text.startswith("## "):
         err(f"{rel}: '## ' 헤더 없음")
+        failed = True
+    plain = _PLAIN_APPENDIX_RE.findall(text)
+    if plain:
+        err(
+            f"{rel}: 부칙 {len(plain)}건이 헤더가 아닌 평문으로 남음 "
+            "— reformat_regulation.py 로 재생성 필요"
+        )
         failed = True
     if "․" in text:
         count = text.count("․")
