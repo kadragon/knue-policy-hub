@@ -33,8 +33,21 @@ _SECTION_RE = re.compile(r"^(제\d+절)\s+(.+)$")
 # 조(條): 제N조(제목) 또는 제N조의M(제목) — 조의 M 사이 공백 허용
 _ARTICLE_RE = re.compile(r"^(제\d+조(?:의\s*\d+)?)\(([^)]+)\)(.*)")
 
-# 부칙·별표·별지
-_APPENDIX_RE = re.compile(r"^(부칙|별표\s*\d*|별지\s*제?\d*\s*서식?)\s*(.*)")
+# 부칙·별표·별지 — 원문이 "부 칙" 처럼 사이 공백을 두거나
+# "[별표]"·"<별지 제1호>" 처럼 괄호로 감싸는 경우가 있다.
+# 별지는 번호("제1호"/"1")나 "서식" 중 하나는 있어야 한다 — 맨 "별지" 로
+# 시작하는 평문(예: "별지원위원회") 을 헤더로 올리지 않기 위함이다.
+_APPENDIX_RE = re.compile(
+    r"^[\[<]?("
+    r"부\s*칙"
+    r"|별표\s*\d*"
+    r"|별지(?:\s*제?\s*\d+\s*호?(?:\s*서식)?|\s*서식)"
+    r")[\]>]?\s*(.*)"
+)
+
+# 부칙 본문의 개정문("[별표 1] 중 “교학처”를 … 으로 한다.") 은 부록 헤더가
+# 아니다. 괄호 표기를 받아들이면서 이 문장까지 헤더로 승격되면 부칙이 잘린다.
+_AMENDMENT_REST_RE = re.compile(r'^중[\s“"]|한다\.?$')
 
 
 _TABLE_SEP_RE = re.compile(r"^\|[-| ]+\|$")
@@ -61,7 +74,21 @@ def _table_row_as_history(line: str) -> str | None:
     return text if _HISTORY_RE.match(text) else None
 
 
+# 원문이 쓰는 유사 문자 → 저장소 표준 문자.
+# check_quality.py 가 U+2024 를 오류로 잡으므로 변환 단계에서 정규화한다.
+_CHAR_FIXES = {
+    "\u2024": "\u00b7",  # ONE DOT LEADER → MIDDLE DOT
+}
+
+
+def _normalize_chars(text: str) -> str:
+    for bad, good in _CHAR_FIXES.items():
+        text = text.replace(bad, good)
+    return text
+
+
 def reformat(raw: str, reg_name: str) -> str:
+    raw = _normalize_chars(raw)
     lines = [ln.rstrip() for ln in raw.splitlines()]
 
     # 장(章) 존재 여부에 따라 조문 헤더 레벨 결정
@@ -169,12 +196,26 @@ def reformat(raw: str, reg_name: str) -> str:
         # 부칙·별표·별지
         m = _APPENDIX_RE.match(ln)
         if m:
-            name = m.group(1).strip()
+            # 원문의 "부 칙" 표기는 "부칙" 으로 붙이고,
+            # "별지 제1호 서식" 처럼 의미 있는 공백은 한 칸으로 남긴다
+            name = re.sub(r"\s+", " ", m.group(1)).strip()
             rest = m.group(2).strip()
+            if _AMENDMENT_REST_RE.search(rest):
+                # 개정문 문장 — 본문으로 그대로 둔다
+                out.append(raw_ln)
+                continue
+            if name.replace(" ", "") == "부칙":
+                name = "부칙"
+                # "부 칙(규정 제375호, 2009. 3. 1.)" 의 괄호는 그 부칙을 식별하는
+                # 판별자다. 본문으로 떼어내면 부칙이 모두 "## 부칙" 이 되어
+                # 시점별 부칙 선택이 불가능해진다 — 헤더에 붙여 둔다.
+                if rest.startswith("("):
+                    name = f"부칙{rest}"
+                    rest = ""
             _push_blank(out)
             out.append(f"{art_level} {name}")
+            out.append("")
             if rest:
-                out.append("")
                 out.append(rest)
             continue
 
