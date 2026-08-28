@@ -186,8 +186,11 @@ def reformat(raw: str, reg_name: str) -> str:
         # 부칙·별표·별지
         m = _APPENDIX_RE.match(ln)
         if m:
-            # 원문의 "부 칙" 표기를 헤더 이름으로 정규화한다
-            name = re.sub(r"\s+", "", m.group(1))
+            # 원문의 "부 칙" 표기는 "부칙" 으로 붙이고,
+            # "별지 제1호 서식" 처럼 의미 있는 공백은 한 칸으로 남긴다
+            name = re.sub(r"\s+", " ", m.group(1)).strip()
+            if name.replace(" ", "") == "부칙":
+                name = "부칙"
             rest = m.group(2).strip()
             _push_blank(out)
             out.append(f"{art_level} {name}")
