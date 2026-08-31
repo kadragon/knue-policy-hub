@@ -18,6 +18,9 @@ uv run --project tools python tools/check_updates.py
 # Check and apply changes to regulations.json
 uv run --project tools python tools/check_updates.py --update
 
+# Detect body revisions that kept the same fileNo (parses all previews, ~10 min)
+uv run --project tools python tools/check_updates.py --check-revisions [--workers N]
+
 # Parse a regulation preview page → RAW markdown
 uv run --project tools python tools/parse_preview.py --file-no <N>
 
@@ -69,6 +72,13 @@ KNUE website → check_updates.py → GitHub issues (regulation-update label)
                              → commit on regulation-sync/YYYY-MM-DD branch
 ```
 
+**fileNo changes are not the only signal.** A regulation can be revised while keeping its
+fileNo, in which case the weekly diff reports "변경 사항 없음" and the markdown silently goes
+stale (an audit on 2026-08-31 found 7 such files, one three revisions behind). `--check-revisions`
+compares the latest date in each preview body against the local markdown to catch those; it
+parses every preview with Playwright (~10 min), so it is opt-in and not part of the CI job —
+run it periodically by hand.
+
 The CI workflow (`check-regulation-updates.yml`, runs Monday 00:00 UTC) creates issues **and** immediately runs `check_updates.py --update` to pre-update `regulations.json`. By the time the skill processes issues, `regulations.json` already has updated `file_no` values — only the markdown files and `section`/`local_path` fields remain to be filled in by the skill.
 
 ### Regulation File Format
@@ -88,7 +98,7 @@ Quality gate: first line starts with `# <REG_NAME>`, file ≥ 500 chars, at leas
 
 | File | Role |
 |------|------|
-| `tools/check_updates.py` | Scrapes KNUE site, diffs against `regulations.json`, optionally applies changes |
+| `tools/check_updates.py` | Scrapes KNUE site, diffs against `regulations.json`, optionally applies changes; `--check-revisions` also diffs revision dates |
 | `tools/parse_preview.py` | Playwright headless scraper: preview URL → RAW markdown |
 | `tools/reformat_regulation.py` | Rule-based RAW → repository format converter |
 | `tools/taxonomy.py` | `domain`/`audience` allowed-value vocabulary (SSOT) |
