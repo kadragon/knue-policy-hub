@@ -109,12 +109,6 @@ requests) checks only the listed markdown files. Whole-repo checks — JSON inte
 agent-prompt axis sync — must be called *outside* the `if not pr_mode:` branch, or they never
 run in CI at all.
 
-## Docs
-
-| File | Role |
-|------|------|
-| `docs/rag-agent-prompt.md` | System prompt for the KNUE regulation RAG agent, plus chunking notes. Keep its 축 1/축 2 values in sync with `tools/taxonomy.py`. |
-
 ## Branching
 
 The `update-regulations` skill creates `regulation-sync/YYYY-MM-DD` branches. All regulation content work goes through that pattern. The automated CI bot commits `regulations.json` updates directly to `main`.
