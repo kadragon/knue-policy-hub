@@ -80,6 +80,9 @@ def _extract_lines(page) -> list[str]:
             // groups, and nothing in the band spills into the first body row. Anything
             // less certain stays unfolded, so a row-0 label that groups data rows (e.g.
             // 「1학년」 rowspan over course rows) is never swallowed into the header.
+            // Known limit: HWP exports use TD only, so text-only data rows grouped under
+            // a row-0 label (학부 → 입학원서/사진) are indistinguishable from sub-labels and
+            // still fold — diff folded headers by hand when re-parsing.
             function headerDepth(head, src, full) {
                 const depth = Math.max(1, ...head.map(h => h.rs));
                 if (depth < 2 || depth >= full.length) return 1;
