@@ -76,17 +76,33 @@ def _extract_lines(page) -> list[str]:
             function extractTable(table) {
                 const rows = collectRows(table);
                 if (!rows.length) return '';
-                const data = [];
-                for (const tr of rows) {
-                    const cells = [];
+                // Expand rowspan/colspan into a grid, repeating the spanned text in every
+                // slot it covers so each markdown row stays self-contained and columns line
+                // up with multi-row headers. Without this, spanned cells shift left.
+                const grid = [];
+                const own = [];  // own[r]: row r has at least one non-empty originating cell
+                rows.forEach((tr, r) => {
+                    grid[r] = grid[r] || [];
+                    let c = 0;
                     for (const cell of tr.children) {
                         const ct = (cell.tagName || '').toUpperCase();
-                        if (ct === 'TD' || ct === 'TH') {
-                            cells.push(cellText(cell));
+                        if (ct !== 'TD' && ct !== 'TH') continue;
+                        while (grid[r][c] !== undefined) c++;
+                        const text = cellText(cell);
+                        if (text) own[r] = true;
+                        const rs = Math.max(1, cell.rowSpan || 1);
+                        const cs = Math.max(1, cell.colSpan || 1);
+                        for (let dr = 0; dr < rs && r + dr < rows.length; dr++) {
+                            grid[r + dr] = grid[r + dr] || [];
+                            for (let dc = 0; dc < cs; dc++) grid[r + dr][c + dc] = text;
                         }
+                        c += cs;
                     }
-                    if (cells.length) data.push(cells);
-                }
+                });
+                // Drop rows that add nothing of their own (only span leftovers or blanks).
+                const data = grid
+                    .filter((row, r) => own[r])
+                    .map(row => Array.from(row, v => v === undefined ? '' : v));
                 if (!data.length) return '';
                 const cols = Math.max(...data.map(r => r.length));
                 const norm = data.map(r => [...r, ...Array(cols - r.length).fill('')]);
