@@ -92,7 +92,9 @@ Expected structure after `reformat_regulation.py`:
 - `## 제N조(조문제목)` or `### 제N조(조문제목)` for articles (three `#` when chapters exist)
 - `## 부칙`, `## 별표`, etc. for appendices (`### 부칙` etc. when chapters exist, matching article level)
 
-Quality gate: first line starts with `# <REG_NAME>`, file ≥ 500 chars, at least one `## ` header.
+Quality gate: `_check_md_file()` in `tools/check_quality.py` is the authority (first line
+`# <REG_NAME>`, minimum length, a `## ` header, body title vs `official_name`, 부칙 as headers,
+no U+2024) — read it rather than restating thresholds here.
 
 ### Tools
 

@@ -73,20 +73,89 @@ def _extract_lines(page) -> list[str]:
                 }
                 return rows;
             }
+            // Depth of a grouped header band at the top of the table, or 1 when there is
+            // none. Fold only when the band is unambiguously a header: every row-0 cell
+            // either spans the whole band or is a group (colspan) with labels below it,
+            // the rows inside the band hold only non-empty, non-numeric labels under those
+            // groups, and nothing in the band spills into the first body row. Anything
+            // less certain stays unfolded, so a row-0 label that groups data rows (e.g.
+            // 「1학년」 rowspan over course rows) is never swallowed into the header.
+            // Known limit: HWP exports use TD only, so text-only data rows grouped under
+            // a row-0 label (학부 → 입학원서/사진) are indistinguishable from sub-labels and
+            // still fold — diff folded headers by hand when re-parsing.
+            function headerDepth(head, src, full) {
+                const depth = Math.max(1, ...head.map(h => h.rs));
+                if (depth < 2 || depth >= full.length) return 1;
+                if (head.some(h => h.rs !== depth && h.cs < 2)) return 1;
+                const groupCols = new Set();
+                for (const h of head) {
+                    if (h.rs < depth) for (let dc = 0; dc < h.cs; dc++) groupCols.add(h.c + dc);
+                }
+                if (!groupCols.size) return 1;
+                for (let r = 1; r < depth; r++) {
+                    for (let c = 0; c < full[r].length; c++) {
+                        if (src[r][c] === 0) continue;
+                        if (!groupCols.has(c) || /^[\\d\\s.,%~+-]*$/.test(full[r][c])) return 1;
+                    }
+                }
+                if (src[depth].some(s => s !== depth)) return 1;
+                return depth;
+            }
             function extractTable(table) {
                 const rows = collectRows(table);
                 if (!rows.length) return '';
-                const data = [];
-                for (const tr of rows) {
-                    const cells = [];
+                // Expand rowspan/colspan into a grid, repeating the spanned text in every
+                // slot it covers so each markdown row stays self-contained and columns line
+                // up with multi-row headers. Without this, spanned cells shift left.
+                const grid = [];
+                const src = [];  // src[r][c]: row index where the cell covering (r, c) starts
+                const own = [];  // own[r]: row r has at least one non-empty originating cell
+                const head = []; // row-0 cells: {c, rs, cs}
+                rows.forEach((tr, r) => {
+                    grid[r] = grid[r] || [];
+                    src[r] = src[r] || [];
+                    let c = 0;
                     for (const cell of tr.children) {
                         const ct = (cell.tagName || '').toUpperCase();
-                        if (ct === 'TD' || ct === 'TH') {
-                            cells.push(cellText(cell));
+                        if (ct !== 'TD' && ct !== 'TH') continue;
+                        while (grid[r][c] !== undefined) c++;
+                        const text = cellText(cell);
+                        if (text) own[r] = true;
+                        const rs = Math.max(1, cell.rowSpan || 1);
+                        const cs = Math.max(1, cell.colSpan || 1);
+                        if (r === 0) head.push({c, rs, cs});
+                        for (let dr = 0; dr < rs && r + dr < rows.length; dr++) {
+                            grid[r + dr] = grid[r + dr] || [];
+                            src[r + dr] = src[r + dr] || [];
+                            for (let dc = 0; dc < cs; dc++) {
+                                grid[r + dr][c + dc] = text;
+                                src[r + dr][c + dc] = r;
+                            }
                         }
+                        c += cs;
                     }
-                    if (cells.length) data.push(cells);
+                });
+                const full = grid.map(row => Array.from(row, v => v === undefined ? '' : v));
+                const depth = headerDepth(head, src, full);
+                let data = [];
+                if (depth > 1) {
+                    // Grouped header (e.g. 「하사관」 over 상사/중사/하사): markdown allows
+                    // one header row, so fold the band, joining each column's distinct labels.
+                    const width = Math.max(...full.slice(0, depth).map(r => r.length));
+                    const folded = [];
+                    for (let c = 0; c < width; c++) {
+                        const parts = [];
+                        for (const row of full.slice(0, depth)) {
+                            const v = row[c] || '';
+                            if (v && !parts.includes(v)) parts.push(v);
+                        }
+                        folded.push(parts.join(' / '));
+                    }
+                    data.push(folded);
                 }
+                // Drop rows that add nothing of their own (only span leftovers or blanks).
+                const bodyStart = depth > 1 ? depth : 0;
+                full.forEach((row, r) => { if (r >= bodyStart && own[r]) data.push(row); });
                 if (!data.length) return '';
                 const cols = Math.max(...data.map(r => r.length));
                 const norm = data.map(r => [...r, ...Array(cols - r.length).fill('')]);

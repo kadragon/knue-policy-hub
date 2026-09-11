@@ -21,3 +21,8 @@ Out-of-scope findings from the PR #50 review cycle (feat/regulation-taxonomy).
 ## [P3] update-regulations 스킬: Playwright 중복 fetch
 신규 규정 이슈마다 step 0(규정명 확인)과 step 3(본문 파싱)이 같은 미리보기를 두 번 스크랩한다.
 step 3에서 한 번만 파싱한 뒤 첫 줄을 이슈의 `<name>`과 대조하도록 합칠 것. (출처: code-review P3)
+
+## Parser table follow-ups (from fix/pr-35-review-backlog-parser-rowspan-colspan)
+
+- [ ] [debt] `cellText()`가 `textContent`를 써서 셀 내 `<br>` 경계가 사라짐 — 학사관리 규정 성적등급 표가 `4.504.40-4.49`로 붙어 나와 현재 md는 ` / ` 수작업 보정본. 재파싱 시 퇴행 (source: task-next) — `tools/parse_preview.py:59`
+- [ ] [debt] rowspan/colspan 전개 이전에 생성된 표 보유 규정(`grep -rl '^|' 규정` 27개) 재파싱 대조 — span 붕괴 표 식별 후 해당 블록만 교체. 헤더로 접힌(` / ` 결합) 표는 원문과 수동 대조 — 텍스트 전용 데이터 행이 헤더로 접힐 수 있음(`headerDepth()` 주석) (source: task-next) — `tools/parse_preview.py:76`
