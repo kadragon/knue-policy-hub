@@ -81,6 +81,7 @@ def _extract_lines(page) -> list[str]:
                 // up with multi-row headers. Without this, spanned cells shift left.
                 const grid = [];
                 const own = [];  // own[r]: row r has at least one non-empty originating cell
+                let headRowSpan = 1, headColSpanned = false;
                 rows.forEach((tr, r) => {
                     grid[r] = grid[r] || [];
                     let c = 0;
@@ -92,6 +93,10 @@ def _extract_lines(page) -> list[str]:
                         if (text) own[r] = true;
                         const rs = Math.max(1, cell.rowSpan || 1);
                         const cs = Math.max(1, cell.colSpan || 1);
+                        if (r === 0) {
+                            headRowSpan = Math.max(headRowSpan, rs);
+                            if (cs > 1) headColSpanned = true;
+                        }
                         for (let dr = 0; dr < rs && r + dr < rows.length; dr++) {
                             grid[r + dr] = grid[r + dr] || [];
                             for (let dc = 0; dc < cs; dc++) grid[r + dr][c + dc] = text;
@@ -100,9 +105,26 @@ def _extract_lines(page) -> list[str]:
                     }
                 });
                 // Drop rows that add nothing of their own (only span leftovers or blanks).
-                const data = grid
-                    .filter((row, r) => own[r])
-                    .map(row => Array.from(row, v => v === undefined ? '' : v));
+                let data = grid
+                    .map(row => Array.from(row, v => v === undefined ? '' : v))
+                    .filter((row, r) => own[r]);
+                // Grouped header (row 0 has both a colspan group and rowspan cells, e.g.
+                // 「하사관」 over 상사/중사/하사): markdown allows one header row, so fold
+                // the stacked header rows into one, joining each column's distinct labels.
+                const depth = headRowSpan;
+                if (headColSpanned && depth > 1 && depth < data.length) {
+                    const width = Math.max(...data.slice(0, depth).map(r => r.length));
+                    const head = [];
+                    for (let c = 0; c < width; c++) {
+                        const parts = [];
+                        for (const row of data.slice(0, depth)) {
+                            const v = row[c] || '';
+                            if (v && !parts.includes(v)) parts.push(v);
+                        }
+                        head.push(parts.join(' / '));
+                    }
+                    data = [head, ...data.slice(depth)];
+                }
                 if (!data.length) return '';
                 const cols = Math.max(...data.map(r => r.length));
                 const norm = data.map(r => [...r, ...Array(cols - r.length).fill('')]);
