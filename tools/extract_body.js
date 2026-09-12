@@ -115,6 +115,7 @@
         rows.forEach((tr, r) => {
             grid[r] = grid[r] || [];
             src[r] = src[r] || [];
+            srcc[r] = srcc[r] || [];
             let c = 0;
             for (const cell of tr.children) {
                 const ct = (cell.tagName || '').toUpperCase();
@@ -153,13 +154,22 @@
             // Grouped header (e.g. 「하사관」 over 상사/중사/하사): markdown allows
             // one header row, so fold the band, joining each column's distinct labels.
             const width = Math.max(...full.slice(0, depth).map(r => r.length));
+            const bandSpan = new Map();   // row-0 origin column → that cell's rowspan
+            for (const h of head) bandSpan.set(h.c, h.rs);
             const folded = [];
             for (let c = 0; c < width; c++) {
                 const parts = [];
-                for (const row of full.slice(0, depth)) {
+                full.slice(0, depth).forEach((row, r) => {
+                    // Repeating a group label onto its children is the point of the fold
+                    // (하사관 / 상사, 하사관 / 중사). A row-0 cell that covers the whole
+                    // band has no children below it, so repeating it just duplicates a
+                    // header across the columns it spans (구 분 ×4) — print it at its
+                    // origin column only, exactly like the body rows.
+                    if (src[r][c] === 0 && srcc[r][c] !== c
+                        && bandSpan.get(srcc[r][c]) === depth) return;
                     const v = row[c] || '';
                     if (v && !parts.includes(v)) parts.push(v);
-                }
+                });
                 folded.push(parts.join(' / '));
             }
             data.push(folded);

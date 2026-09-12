@@ -25,10 +25,30 @@ jobs:
       - name: Lint Python tools
         run: uv run --project tools --with ruff ruff check tools/ --select E,F,W --ignore E501
 
+      - name: Detect tools/ changes
+        id: tools
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            # Keep the diff on its own line: piping it into grep would hide a git
+            # failure behind grep's exit status and skip the tests silently.
+            files=$(git diff --name-only "origin/${BASE_REF}...HEAD")
+            if grep -q '^tools/' <<<"$files"; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
       - name: Install chromium for parser tests
+        if: steps.tools.outputs.changed == 'true'
         run: uv run --project tools playwright install --with-deps chromium
 
       - name: Parser tests
+        if: steps.tools.outputs.changed == 'true'
         run: uv run --project tools --with pytest pytest tools/tests -q
 
       - name: Get changed regulation files (PR mode)

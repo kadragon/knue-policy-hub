@@ -125,6 +125,43 @@ CASES = [
         id="header-band-folded",
     ),
     pytest.param(
+        # 밴드 전체를 덮은 row-0 셀은 자식 라벨이 없으므로 원점 열에서만 찍는다
+        # (시설 사용료 종합운동장 표의 `구 분` ×4).
+        """<table>
+          <tr><td rowspan="2" colspan="2">구 분</td><td colspan="2">사용료</td></tr>
+          <tr><td>주간</td><td>야간</td></tr>
+          <tr><td>운동장</td><td>A</td><td>1</td><td>2</td></tr>
+        </table>""",
+        [
+            "| 구 분 |  | 사용료 / 주간 | 사용료 / 야간 |",
+            "|---|---|---|---|",
+            "| 운동장 | A | 1 | 2 |",
+        ],
+        id="full-band-span-origin-only",
+    ),
+    pytest.param(
+        # 데이터 행을 묶는 row-0 rowspan 라벨은 헤더로 접히지 않아야 한다
+        # (「1학년」이 헤더에 삼켜지면 데이터 행이 사라진다).
+        """<table>
+          <tr><td rowspan="2">1학년</td><td>국어</td></tr>
+          <tr><td>수학</td></tr>
+          <tr><td>2학년</td><td>영어</td></tr>
+        </table>""",
+        ["| 1학년 | 국어 |", "|---|---|", "| 1학년 | 수학 |", "| 2학년 | 영어 |"],
+        id="rowspan-label-not-folded",
+    ),
+    pytest.param(
+        # 위에서 스팬을 받은 열이 섞인 빈 행은 HWP 레이아웃 스페이서이므로 버린다
+        # (남기면 스팬 데이터 행이 한 번 더 찍힌다).
+        """<table>
+          <tr><td>항목</td><td>값</td></tr>
+          <tr><td rowspan="2">가</td><td>1</td></tr>
+          <tr><td></td></tr>
+        </table>""",
+        ["| 항목 | 값 |", "|---|---|", "| 가 | 1 |"],
+        id="spacer-row-dropped",
+    ),
+    pytest.param(
         # 셀 안 파이프는 표 구조를 깨지 않도록 이스케이프한다.
         """<table>
           <tr><td>구분</td><td>값</td></tr>
