@@ -57,7 +57,31 @@ def _extract_lines(page) -> list[str]:
                 'BLOCKQUOTE','PRE','THEAD','TBODY','TFOOT','BR',
             ]);
             function cellText(td) {
-                return (td.textContent || '').replace(/\\s+/g, ' ').trim().replace(/\\|/g, '\\\\|');
+                // textContent glues stacked values together because <br> and block
+                // boundaries inside a cell carry no character (4.50 + 4.40-4.49 →
+                // "4.504.40-4.49"). Walk the cell and join the pieces with the same
+                // ' / ' separator the header-band fold below uses.
+                const parts = [];
+                let buf = '';
+                function flush() {
+                    const s = buf.replace(/\\s+/g, ' ').trim();
+                    if (s) parts.push(s);
+                    buf = '';
+                }
+                function walkCell(node) {
+                    for (const child of node.childNodes) {
+                        if (child.nodeType === 3) { buf += child.nodeValue || ''; continue; }
+                        if (child.nodeType !== 1) continue;
+                        const ct = (child.tagName || '').toUpperCase();
+                        if (ct === 'SCRIPT' || ct === 'STYLE') continue;
+                        if (ct === 'BR') { flush(); continue; }
+                        if (BLOCK_TAGS.has(ct)) { flush(); walkCell(child); flush(); continue; }
+                        walkCell(child);
+                    }
+                }
+                walkCell(td);
+                flush();
+                return parts.join(' / ').replace(/\\|/g, '\\\\|');
             }
             function collectRows(tbl) {
                 const rows = [];
@@ -109,7 +133,7 @@ def _extract_lines(page) -> list[str]:
                 // up with multi-row headers. Without this, spanned cells shift left.
                 const grid = [];
                 const src = [];  // src[r][c]: row index where the cell covering (r, c) starts
-                const own = [];  // own[r]: row r has at least one non-empty originating cell
+                const own = [];  // own[r]: row r starts at least one cell of its own
                 const head = []; // row-0 cells: {c, rs, cs}
                 rows.forEach((tr, r) => {
                     grid[r] = grid[r] || [];
@@ -120,7 +144,7 @@ def _extract_lines(page) -> list[str]:
                         if (ct !== 'TD' && ct !== 'TH') continue;
                         while (grid[r][c] !== undefined) c++;
                         const text = cellText(cell);
-                        if (text) own[r] = true;
+                        own[r] = true;
                         const rs = Math.max(1, cell.rowSpan || 1);
                         const cs = Math.max(1, cell.colSpan || 1);
                         if (r === 0) head.push({c, rs, cs});
@@ -153,7 +177,9 @@ def _extract_lines(page) -> list[str]:
                     }
                     data.push(folded);
                 }
-                // Drop rows that add nothing of their own (only span leftovers or blanks).
+                // Drop rows made only of span leftovers. A row that starts a cell of its
+                // own is kept even when every cell is empty — blank rows in a 서식 table
+                // are the fill-in space, not padding.
                 const bodyStart = depth > 1 ? depth : 0;
                 full.forEach((row, r) => { if (r >= bodyStart && own[r]) data.push(row); });
                 if (!data.length) return '';

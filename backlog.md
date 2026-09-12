@@ -22,7 +22,10 @@ Out-of-scope findings from the PR #50 review cycle (feat/regulation-taxonomy).
 신규 규정 이슈마다 step 0(규정명 확인)과 step 3(본문 파싱)이 같은 미리보기를 두 번 스크랩한다.
 step 3에서 한 번만 파싱한 뒤 첫 줄을 이슈의 `<name>`과 대조하도록 합칠 것. (출처: code-review P3)
 
-## Parser table follow-ups (from fix/pr-35-review-backlog-parser-rowspan-colspan)
+## Parser table follow-ups (2차, from fix/parser-table-follow-ups)
 
-- [ ] [debt] `cellText()`가 `textContent`를 써서 셀 내 `<br>` 경계가 사라짐 — 학사관리 규정 성적등급 표가 `4.504.40-4.49`로 붙어 나와 현재 md는 ` / ` 수작업 보정본. 재파싱 시 퇴행 (source: task-next) — `tools/parse_preview.py:59`
-- [ ] [debt] rowspan/colspan 전개 이전에 생성된 표 보유 규정(`grep -rl '^|' 규정` 27개) 재파싱 대조 — span 붕괴 표 식별 후 해당 블록만 교체. 헤더로 접힌(` / ` 결합) 표는 원문과 수동 대조 — 텍스트 전용 데이터 행이 헤더로 접힐 수 있음(`headerDepth()` 주석) (source: task-next) — `tools/parse_preview.py:76`
+- [ ] [debt] 미리보기 뷰어가 본문을 내주지 않는 규정 3건 — 교육대학원 학칙(1655)·지식재산권 규정(946)은 `#content_body`가 빈 채로 렌더링되고, 학칙(1598)은 14페이지에서 렌더링이 멈춰 전체의 31%만 나온다. 표 대조에서 제외됨. 대체 경로(HWP 직접 내려받기 등) 검토 (source: task-next) — `tools/parse_preview.py`
+- [ ] [debt] 별지 서식 표 46건이 md에 표로 존재하지 않음 — 교직원 행동강령 13건, 국외출장 16건, 주택관리 5건 등. 재파싱 산출물에는 표로 잡히나 md는 평문. `reformat_regulation.py`의 별지 처리 확인 후 일괄 반영 (source: task-next) — `tools/reformat_regulation.py`
+- [ ] [debt] 제·개정 이력이 표로 남은 md 존재(교육정보원 규정 4행 등) — 재파싱 산출물은 이력을 평문으로 뽑으므로 md 쪽이 구형. 이력 블록 정규화 필요 (source: task-next) — `규정/제2편/제1장/한국교원대학교 교육정보원 규정.md:4`
+- [ ] [debt] `headerDepth()`가 접지 못한 다단 헤더는 스팬 텍스트를 열마다 반복 출력 — 시설 사용료 종합운동장 표가 `구 분 | 구 분 | 구 분 | 구 분`, 겸임교원 심사표가 `심사결과` ×6. 접기 조건 완화 검토 (source: task-next) — `tools/parse_preview.py:76`
+- [ ] [debt] 표 블록을 직접 갈아끼울 때 `reformat_regulation._normalize_chars()`를 거치지 않으면 U+2024가 md에 유입돼 품질 게이트가 깨진다. RAW→md 경로 밖에서도 정규화가 걸리도록 정리 (source: task-next) — `tools/reformat_regulation.py:78`
