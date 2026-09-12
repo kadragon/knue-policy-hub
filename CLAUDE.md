@@ -21,6 +21,9 @@ uv run --project tools python tools/check_updates.py --update
 # Detect body revisions that kept the same fileNo (parses all previews, ~10 min)
 uv run --project tools python tools/check_updates.py --check-revisions [--workers N]
 
+# Run the table-parser tests (local HTML fixtures, no network)
+uv run --project tools --with pytest pytest tools/tests -q
+
 # Parse a regulation preview page → RAW markdown
 uv run --project tools python tools/parse_preview.py --file-no <N>
 
@@ -102,6 +105,7 @@ no U+2024) — read it rather than restating thresholds here.
 |------|------|
 | `tools/check_updates.py` | Scrapes KNUE site, diffs against `regulations.json`, optionally applies changes; `--check-revisions` also diffs revision dates |
 | `tools/parse_preview.py` | Playwright headless scraper: preview URL → RAW markdown |
+| `tools/extract_body.js` | `parse_preview.py`가 페이지에서 평가하는 DOM→텍스트/표 추출기 (`tools/tests/test_extract_body.py`가 로컬 fixture로 검증) |
 | `tools/reformat_regulation.py` | Rule-based RAW → repository format converter |
 | `tools/taxonomy.py` | `domain`/`audience` allowed-value vocabulary (SSOT) |
 | `tools/check_quality.py` | JSON integrity + taxonomy + markdown quality gate + agent-prompt axis sync (CI) |

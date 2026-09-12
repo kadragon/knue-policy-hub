@@ -17,6 +17,7 @@ packages = ["."]
 only-include = [
     "check_updates.py",
     "parse_preview.py",
+    "extract_body.js",
     "regulations.json",
 ]
 
