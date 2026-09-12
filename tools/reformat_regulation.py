@@ -78,6 +78,9 @@ def _table_row_as_history(line: str) -> str | None:
 # check_quality.py 가 U+2024 를 오류로 잡으므로 변환 단계에서 정규화한다.
 _CHAR_FIXES = {
     "\u2024": "\u00b7",  # ONE DOT LEADER → MIDDLE DOT
+    # 원문은 면적을 m2 / m² / ㎡ 세 가지로 쓴다. 단위 검색이 갈라지지 않도록 ㎡ 로 모은다.
+    "m\u00b2": "\u33a1",  # m² → ㎡
+    "m2": "\u33a1",
 }
 
 

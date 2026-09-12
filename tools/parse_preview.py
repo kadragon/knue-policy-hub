@@ -56,6 +56,23 @@ def _extract_lines(page) -> list[str]:
                 'HEADER','FOOTER','H1','H2','H3','H4','H5','H6',
                 'BLOCKQUOTE','PRE','THEAD','TBODY','TFOOT','BR',
             ]);
+            // A cell's blocks are either stacked values (4.50 / 4.40-4.49 …), which need a
+            // visible separator, or one label that HWP wrapped mid-word. Gluing the first
+            // loses data; separating the second makes 부처국본부장 ungreppable. Two shapes
+            // are unambiguous labels: every block a single Hangul syllable (세로쓰기), and a
+            // two-block Hangul phrase short enough to be one wrapped term.
+            function joinPieces(parts) {
+                if (parts.length < 2) return parts.join('');
+                const hangul = s => /^[가-힣][가-힣 ]*$/.test(s);
+                const wrapped = parts.every(s => /^[가-힣]$/.test(s))
+                    || (parts.length === 2 && parts.every(hangul)
+                        && parts.join('').replace(/ /g, '').length <= 12);
+                if (wrapped) return parts.join('');
+                // Never double a slash the source already wrote (학술지 + /출판사).
+                return parts.reduce((acc, s) => !acc ? s
+                    : acc.endsWith('/') || s.startsWith('/') ? acc + s
+                    : acc + ' / ' + s, '');
+            }
             function cellText(td) {
                 // textContent glues stacked values together because <br> and block
                 // boundaries inside a cell carry no character (4.50 + 4.40-4.49 →
@@ -81,7 +98,7 @@ def _extract_lines(page) -> list[str]:
                 }
                 walkCell(td);
                 flush();
-                return parts.join(' / ').replace(/\\|/g, '\\\\|');
+                return joinPieces(parts).replace(/\\|/g, '\\\\|');
             }
             function collectRows(tbl) {
                 const rows = [];
@@ -133,7 +150,8 @@ def _extract_lines(page) -> list[str]:
                 // up with multi-row headers. Without this, spanned cells shift left.
                 const grid = [];
                 const src = [];  // src[r][c]: row index where the cell covering (r, c) starts
-                const own = [];  // own[r]: row r starts at least one cell of its own
+                const own = [];  // own[r]: row r starts a cell of its own that has text
+                const opens = []; // opens[r]: cells row r starts, whatever their text
                 const head = []; // row-0 cells: {c, rs, cs}
                 rows.forEach((tr, r) => {
                     grid[r] = grid[r] || [];
@@ -144,7 +162,8 @@ def _extract_lines(page) -> list[str]:
                         if (ct !== 'TD' && ct !== 'TH') continue;
                         while (grid[r][c] !== undefined) c++;
                         const text = cellText(cell);
-                        own[r] = true;
+                        if (text) own[r] = true;
+                        opens[r] = (opens[r] || 0) + 1;
                         const rs = Math.max(1, cell.rowSpan || 1);
                         const cs = Math.max(1, cell.colSpan || 1);
                         if (r === 0) head.push({c, rs, cs});
@@ -177,19 +196,31 @@ def _extract_lines(page) -> list[str]:
                     }
                     data.push(folded);
                 }
-                // Drop rows made only of span leftovers. A row that starts a cell of its
-                // own is kept even when every cell is empty — blank rows in a 서식 table
-                // are the fill-in space, not padding.
+                // Drop rows made only of span leftovers. An all-blank row survives only
+                // when every one of its slots starts here — that is the fill-in space of a
+                // 서식 table. A blank row that also carries columns spanned from above is
+                // an HWP layout spacer, and keeping it duplicates the spanned data row.
                 const bodyStart = depth > 1 ? depth : 0;
-                full.forEach((row, r) => { if (r >= bodyStart && own[r]) data.push(row); });
+                full.forEach((row, r) => {
+                    if (r < bodyStart) return;
+                    if (!(own[r] || (opens[r] && src[r].every(s => s === r)))) return;
+                    // A 서식 with twenty blank fill-in lines needs one blank row, not twenty.
+                    const blank = row.every(v => !v);
+                    if (blank && data.length && data[data.length - 1].every(v => !v)) return;
+                    data.push(row);
+                });
                 if (!data.length) return '';
                 const cols = Math.max(...data.map(r => r.length));
                 const norm = data.map(r => [...r, ...Array(cols - r.length).fill('')]);
                 const mdLines = [];
-                mdLines.push('| ' + norm[0].join(' | ') + ' |');
+                // A cell spanning the whole row repeats across every slot once the grid is
+                // expanded; printing it once and padding keeps a 서식 label row readable.
+                const dedupe = row => row.every(v => v === row[0]) && row[0]
+                    ? [row[0], ...Array(row.length - 1).fill('')] : row;
+                mdLines.push('| ' + dedupe(norm[0]).join(' | ') + ' |');
                 mdLines.push('|' + Array(cols).fill('---').join('|') + '|');
                 for (const row of norm.slice(1)) {
-                    mdLines.push('| ' + row.join(' | ') + ' |');
+                    mdLines.push('| ' + dedupe(row).join(' | ') + ' |');
                 }
                 return '\\n<<<TBL>>>\\n' + mdLines.join('\\n') + '\\n<<</TBL>>>\\n';
             }
