@@ -25,6 +25,12 @@ jobs:
       - name: Lint Python tools
         run: uv run --project tools --with ruff ruff check tools/ --select E,F,W --ignore E501
 
+      - name: Install chromium for parser tests
+        run: uv run --project tools playwright install --with-deps chromium
+
+      - name: Parser tests
+        run: uv run --project tools --with pytest pytest tools/tests -q
+
       - name: Get changed regulation files (PR mode)
         if: github.event_name == 'pull_request'
         env:
