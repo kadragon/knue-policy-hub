@@ -56,8 +56,56 @@ def _extract_lines(page) -> list[str]:
                 'HEADER','FOOTER','H1','H2','H3','H4','H5','H6',
                 'BLOCKQUOTE','PRE','THEAD','TBODY','TFOOT','BR',
             ]);
+            // A cell's blocks are either stacked values (4.50 / 4.40-4.49 …), which need a
+            // visible separator, or one label HWP wrapped mid-word. Only one shape tells the
+            // two apart with certainty: a run of blocks that are each a single character is
+            // 세로쓰기, never a list of values. Two multi-character blocks are ambiguous
+            // (부처 + 국본부장 is a wrapped label, 합격 + 불합격 is two values), so they keep
+            // the separator — splitting a label costs a grep, gluing two values loses data.
+            function joinPieces(parts) {
+                if (parts.length < 2) return parts.join('');
+                const single = s => [...s].length === 1;
+                const merged = [];
+                let run = false;   // the last entry is a run of single-character blocks
+                for (const s of parts) {
+                    if (run && single(s)) {
+                        merged[merged.length - 1] += s;   // 계 + 급 + 별 → 계급별
+                    } else {
+                        merged.push(s);
+                        run = single(s);
+                    }
+                }
+                // Never double a slash the source already wrote (학술지 + /출판사).
+                return merged.reduce((acc, s) => !acc ? s
+                    : acc.endsWith('/') || s.startsWith('/') ? acc + s
+                    : acc + ' / ' + s, '');
+            }
             function cellText(td) {
-                return (td.textContent || '').replace(/\\s+/g, ' ').trim().replace(/\\|/g, '\\\\|');
+                // textContent glues stacked values together because <br> and block
+                // boundaries inside a cell carry no character (4.50 + 4.40-4.49 →
+                // "4.504.40-4.49"). Walk the cell and join the pieces with the same
+                // ' / ' separator the header-band fold below uses.
+                const parts = [];
+                let buf = '';
+                function flush() {
+                    const s = buf.replace(/\\s+/g, ' ').trim();
+                    if (s) parts.push(s);
+                    buf = '';
+                }
+                function walkCell(node) {
+                    for (const child of node.childNodes) {
+                        if (child.nodeType === 3) { buf += child.nodeValue || ''; continue; }
+                        if (child.nodeType !== 1) continue;
+                        const ct = (child.tagName || '').toUpperCase();
+                        if (ct === 'SCRIPT' || ct === 'STYLE') continue;
+                        if (ct === 'BR') { flush(); continue; }
+                        if (BLOCK_TAGS.has(ct)) { flush(); walkCell(child); flush(); continue; }
+                        walkCell(child);
+                    }
+                }
+                walkCell(td);
+                flush();
+                return joinPieces(parts).replace(/\\|/g, '\\\\|');
             }
             function collectRows(tbl) {
                 const rows = [];
@@ -109,7 +157,8 @@ def _extract_lines(page) -> list[str]:
                 // up with multi-row headers. Without this, spanned cells shift left.
                 const grid = [];
                 const src = [];  // src[r][c]: row index where the cell covering (r, c) starts
-                const own = [];  // own[r]: row r has at least one non-empty originating cell
+                const own = [];  // own[r]: row r starts a cell of its own that has text
+                const opens = []; // opens[r]: cells row r starts, whatever their text
                 const head = []; // row-0 cells: {c, rs, cs}
                 rows.forEach((tr, r) => {
                     grid[r] = grid[r] || [];
@@ -121,6 +170,7 @@ def _extract_lines(page) -> list[str]:
                         while (grid[r][c] !== undefined) c++;
                         const text = cellText(cell);
                         if (text) own[r] = true;
+                        opens[r] = (opens[r] || 0) + 1;
                         const rs = Math.max(1, cell.rowSpan || 1);
                         const cs = Math.max(1, cell.colSpan || 1);
                         if (r === 0) head.push({c, rs, cs});
@@ -138,6 +188,7 @@ def _extract_lines(page) -> list[str]:
                 const full = grid.map(row => Array.from(row, v => v === undefined ? '' : v));
                 const depth = headerDepth(head, src, full);
                 let data = [];
+                const cols0 = Math.max(...full.map(row => row.length));
                 if (depth > 1) {
                     // Grouped header (e.g. 「하사관」 over 상사/중사/하사): markdown allows
                     // one header row, so fold the band, joining each column's distinct labels.
@@ -153,9 +204,21 @@ def _extract_lines(page) -> list[str]:
                     }
                     data.push(folded);
                 }
-                // Drop rows that add nothing of their own (only span leftovers or blanks).
+                // Drop rows made only of span leftovers. An all-blank row survives only
+                // when every one of its slots starts here — that is the fill-in space of a
+                // 서식 table. A blank row that also carries columns spanned from above is
+                // an HWP layout spacer, and keeping it duplicates the spanned data row.
                 const bodyStart = depth > 1 ? depth : 0;
-                full.forEach((row, r) => { if (r >= bodyStart && own[r]) data.push(row); });
+                full.forEach((row, r) => {
+                    if (r < bodyStart) return;
+                    const startsHere = Array.from({length: cols0}, (_, c) => src[r][c])
+                        .every(s => s === r);
+                    if (!(own[r] || (opens[r] && startsHere))) return;
+                    // A 서식 with twenty blank fill-in lines needs one blank row, not twenty.
+                    const blank = row.every(v => !v);
+                    if (blank && data.length && data[data.length - 1].every(v => !v)) return;
+                    data.push(row);
+                });
                 if (!data.length) return '';
                 const cols = Math.max(...data.map(r => r.length));
                 const norm = data.map(r => [...r, ...Array(cols - r.length).fill('')]);

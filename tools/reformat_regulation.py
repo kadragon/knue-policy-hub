@@ -80,11 +80,16 @@ _CHAR_FIXES = {
     "\u2024": "\u00b7",  # ONE DOT LEADER → MIDDLE DOT
 }
 
+# 원문은 면적을 m2 / m² / ㎡ 로 섞어 쓴다. 단위 검색이 갈라지지 않게 합자로 모은다.
+# 접두사(cm/km)를 함께 잡지 않으면 300cm2 가 300c㎡ 가 되므로 긴 단위부터 앵커를 걸어 치환한다.
+_UNIT_RE = re.compile(r"(?<![A-Za-z])(c|k)?m(?:2|\u00b2)(?![A-Za-z0-9])", re.IGNORECASE)
+_UNIT_SQUARED = {"": "\u33a1", "c": "\u33a0", "k": "\u33a2"}  # ㎡ / ㎠ / ㎢
+
 
 def _normalize_chars(text: str) -> str:
     for bad, good in _CHAR_FIXES.items():
         text = text.replace(bad, good)
-    return text
+    return _UNIT_RE.sub(lambda m: _UNIT_SQUARED[(m.group(1) or "").lower()], text)
 
 
 def reformat(raw: str, reg_name: str) -> str:
