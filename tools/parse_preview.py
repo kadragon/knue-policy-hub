@@ -57,19 +57,26 @@ def _extract_lines(page) -> list[str]:
                 'BLOCKQUOTE','PRE','THEAD','TBODY','TFOOT','BR',
             ]);
             // A cell's blocks are either stacked values (4.50 / 4.40-4.49 …), which need a
-            // visible separator, or one label that HWP wrapped mid-word. Gluing the first
-            // loses data; separating the second makes 부처국본부장 ungreppable. Two shapes
-            // are unambiguous labels: every block a single Hangul syllable (세로쓰기), and a
-            // two-block Hangul phrase short enough to be one wrapped term.
+            // visible separator, or one label HWP wrapped mid-word. Only one shape tells the
+            // two apart with certainty: a run of blocks that are each a single character is
+            // 세로쓰기, never a list of values. Two multi-character blocks are ambiguous
+            // (부처 + 국본부장 is a wrapped label, 합격 + 불합격 is two values), so they keep
+            // the separator — splitting a label costs a grep, gluing two values loses data.
             function joinPieces(parts) {
                 if (parts.length < 2) return parts.join('');
-                const hangul = s => /^[가-힣][가-힣 ]*$/.test(s);
-                const wrapped = parts.every(s => /^[가-힣]$/.test(s))
-                    || (parts.length === 2 && parts.every(hangul)
-                        && parts.join('').replace(/ /g, '').length <= 12);
-                if (wrapped) return parts.join('');
+                const single = s => [...s].length === 1;
+                const merged = [];
+                let run = false;   // the last entry is a run of single-character blocks
+                for (const s of parts) {
+                    if (run && single(s)) {
+                        merged[merged.length - 1] += s;   // 계 + 급 + 별 → 계급별
+                    } else {
+                        merged.push(s);
+                        run = single(s);
+                    }
+                }
                 // Never double a slash the source already wrote (학술지 + /출판사).
-                return parts.reduce((acc, s) => !acc ? s
+                return merged.reduce((acc, s) => !acc ? s
                     : acc.endsWith('/') || s.startsWith('/') ? acc + s
                     : acc + ' / ' + s, '');
             }
@@ -181,6 +188,7 @@ def _extract_lines(page) -> list[str]:
                 const full = grid.map(row => Array.from(row, v => v === undefined ? '' : v));
                 const depth = headerDepth(head, src, full);
                 let data = [];
+                const cols0 = Math.max(...full.map(row => row.length));
                 if (depth > 1) {
                     // Grouped header (e.g. 「하사관」 over 상사/중사/하사): markdown allows
                     // one header row, so fold the band, joining each column's distinct labels.
@@ -203,7 +211,9 @@ def _extract_lines(page) -> list[str]:
                 const bodyStart = depth > 1 ? depth : 0;
                 full.forEach((row, r) => {
                     if (r < bodyStart) return;
-                    if (!(own[r] || (opens[r] && src[r].every(s => s === r)))) return;
+                    const startsHere = Array.from({length: cols0}, (_, c) => src[r][c])
+                        .every(s => s === r);
+                    if (!(own[r] || (opens[r] && startsHere))) return;
                     // A 서식 with twenty blank fill-in lines needs one blank row, not twenty.
                     const blank = row.every(v => !v);
                     if (blank && data.length && data[data.length - 1].every(v => !v)) return;
@@ -213,14 +223,10 @@ def _extract_lines(page) -> list[str]:
                 const cols = Math.max(...data.map(r => r.length));
                 const norm = data.map(r => [...r, ...Array(cols - r.length).fill('')]);
                 const mdLines = [];
-                // A cell spanning the whole row repeats across every slot once the grid is
-                // expanded; printing it once and padding keeps a 서식 label row readable.
-                const dedupe = row => row.every(v => v === row[0]) && row[0]
-                    ? [row[0], ...Array(row.length - 1).fill('')] : row;
-                mdLines.push('| ' + dedupe(norm[0]).join(' | ') + ' |');
+                mdLines.push('| ' + norm[0].join(' | ') + ' |');
                 mdLines.push('|' + Array(cols).fill('---').join('|') + '|');
                 for (const row of norm.slice(1)) {
-                    mdLines.push('| ' + dedupe(row).join(' | ') + ' |');
+                    mdLines.push('| ' + row.join(' | ') + ' |');
                 }
                 return '\\n<<<TBL>>>\\n' + mdLines.join('\\n') + '\\n<<</TBL>>>\\n';
             }
