@@ -95,9 +95,32 @@ implementation and pass afterward. No regulation file needed editing.
 Inline letter spacing is preserved as the corpus convention; see
 [Regulation transcription conventions](editorial-conventions.md).
 
-## Remaining parser limits
+## Automated HWP recovery
 
-- Automated HWP fallback: the school rules preview still stops after page 15
-  of 46. Six tables were recovered from the official HWP download and checked
-  against the stored text. Future unattended updates now reject incomplete
-  previews; an automatic HWP conversion path remains a separate integration task.
+Incomplete previews now download the official HWP for the same file number from
+`https://www.knue.ac.kr/downloadContentsFile.do?key=392&fileNo=<N>`.
+A complete preview keeps the existing DOM path. The fallback runs only when the
+viewer completion wait times out; other browser errors still fail normally.
+
+`tools/hwp_fallback.py` uses pinned `pyhwp==0.1b15` with `six` and `lxml` from the
+locked tools environment. Its subprocess has a 120-second conversion deadline
+and reads every HWP body section before running the HTML transform directly.
+Unlike the converter CLI, this propagates parse failures instead of accepting
+an exit-zero result after a logged error. Source paragraph strings, including
+repeated values, must occur in both the converted HTML and the final RAW Markdown.
+Existing DOM table extraction preserves spans and cells. Doubled spaces in HWP
+prose are collapsed before RAW conversion so they cannot invent table columns.
+
+Recovery rejects HTTP errors, non-compound downloads, invalid or protected HWP,
+conversion failures/timeouts, omitted text, and unsupported drawings/images.
+HTML extraction runs with page scripts disabled and asset requests blocked.
+Temporary downloads and the recovery browser context are removed on failure too.
+No partial viewer text is returned when recovery fails. HWPX and OCR remain
+unsupported. Text coverage checks do not prove visual layout fidelity; unusual
+objects are rejected rather than guessed.
+
+Local regression tests cover routing, unchanged complete-preview behavior,
+download identity/errors, conversion timeout/corruption, HTML and Markdown loss,
+repeated-cell loss, images, and prose spacing. Live verification on 2026-10-10
+uses the school rules (fileNo 1598), whose preview stops at page 15 of 46, and
+checks the full automatic path, all six tables, and the final certificate form.
