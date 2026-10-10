@@ -75,16 +75,28 @@ columns, `기본` and `배정`. Its existing folded headers were retained.
 These checks address the recorded parser/document findings. They are not a fresh
 revision-date audit of all 97 regulations. Remaining limits are in `backlog.md`.
 
+## Wrapped-label follow-up
+
+The finance regulation's [official preview (fileNo 1693)](https://www.knue.ac.kr/www/previewMenuCntFile.do?key=392&fileNo=1693)
+was parsed again on 2026-10-10. Its first table row contains the exact pieces
+`입학인재` and `관리과`. This header was already repaired as `입학인재관리과`
+in the stored Markdown during the source-backed document repairs above.
+
+The parser now carries that confirmed correction in a file-number-scoped mapping.
+It joins only an exact first-row cell match. The same pieces in body cells or
+other documents retain ` / `, as do `합격` / `불합격`, numeric lists, and changed
+or annotated labels. No cell-width or general word-concatenation heuristic is
+used. Other multi-character labels still require source verification.
+
+The live preview's before/after RAW diff changes only `입학인재 / 관리과` to
+`입학인재관리과`; all other content is identical. Regression tests failed before
+implementation and pass afterward. No regulation file needed editing.
+
+Inline letter spacing is preserved as the corpus convention; see
+[Regulation transcription conventions](editorial-conventions.md).
+
 ## Remaining parser limits
 
-- Multi-character wrapped labels: preserve the separator unless the source
-  unambiguously identifies one label. Narrow cell width alone cannot distinguish
-  `입학인재` + `관리과` from a list such as `합격` / `불합격`. The confirmed
-  `입학인재관리과` header was corrected in the finance regulation; no general
-  concatenation heuristic was introduced. Implementation: `tools/extract_body.js`.
-- Inline letter spacing: decide whether published labels such as `하 사 관`,
-  `조 직`, and `구 분` should be shortened consistently across the corpus. This is
-  an editorial convention; the parser currently preserves source spacing.
 - Automated HWP fallback: the school rules preview still stops after page 15
   of 46. Six tables were recovered from the official HWP download and checked
   against the stored text. Future unattended updates now reject incomplete

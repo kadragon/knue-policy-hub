@@ -1,7 +1,8 @@
 // Extracted from parse_preview.py so the table logic can be exercised against local
 // HTML fixtures (tools/tests/test_extract_body.py) instead of only the live site.
-// Evaluates to a function: (root: Element) => string.
-(root) => {
+// Optional exact header-piece sequences must be verified for the source document.
+// Evaluates to a function: (root: Element, confirmedLabels?: string[][]) => string.
+(root, confirmedLabels = []) => {
     const BLOCK_TAGS = new Set([
         'P','DIV','LI','TR','TD','TH','CAPTION','ARTICLE','SECTION',
         'HEADER','FOOTER','H1','H2','H3','H4','H5','H6',
@@ -40,7 +41,7 @@
             : acc.endsWith('/') || s.startsWith('/') ? acc + s
             : acc + ' / ' + s, '');
     }
-    function cellText(td) {
+    function cellText(td, isHeader) {
         // textContent glues stacked values together because <br> and block
         // boundaries inside a cell carry no character (4.50 + 4.40-4.49 →
         // "4.504.40-4.49"). Walk the cell and join the pieces with the same
@@ -65,7 +66,12 @@
         }
         walkCell(td);
         flush();
-        return joinPieces(parts).replace(/\|/g, '\\|');
+        // An explicit, document-scoped source correction is the only exception
+        // for multi-character blocks. Match the entire header cell exactly;
+        // body values and changed/extended labels retain their separators.
+        const confirmed = isHeader && confirmedLabels.some(label =>
+            label.length === parts.length && label.every((s, i) => s === parts[i]));
+        return (confirmed ? parts.join('') : joinPieces(parts)).replace(/\|/g, '\\|');
     }
     function collectRows(tbl) {
         const rows = [];
@@ -130,7 +136,7 @@
                 const ct = (cell.tagName || '').toUpperCase();
                 if (ct !== 'TD' && ct !== 'TH') continue;
                 while (grid[r][c] !== undefined) c++;
-                const text = cellText(cell);
+                const text = cellText(cell, r === 0);
                 if (text) own[r] = true;
                 opens[r] = (opens[r] || 0) + 1;
                 const rs = Math.max(1, cell.rowSpan || 1);

@@ -38,3 +38,16 @@ def test_delayed_last_page_is_included(page):
     }''')
     parse_preview._wait_for_completion(page)
     assert parse_preview._extract_lines(page) == ["First page Last page"]
+
+
+@pytest.mark.parametrize("file_no,expected", [
+    (1693, "입학인재관리과"),
+    (1590, "입학인재 / 관리과"),
+    (None, "입학인재 / 관리과"),
+])
+def test_confirmed_labels_are_document_scoped(page, file_no, expected):
+    page.set_content('''<iframe id="innerWrap" srcdoc="<div id=content_body>
+    <table><tr><td><p>입학인재</p><p>관리과</p></td><td>구 분</td></tr>
+    <tr><td>가</td><td>나</td></tr></table></div>"></iframe>''')
+    lines = parse_preview._extract_lines(page, file_no=file_no)
+    assert f"| {expected} | 구 분 |" in lines

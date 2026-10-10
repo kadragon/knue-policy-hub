@@ -27,13 +27,14 @@ def extract():
         browser = pw.chromium.launch()
         page = browser.new_page()
 
-        def run(html: str) -> str:
+        def run(html: str, confirmed_labels: list[list[str]] | None = None) -> str:
             page.set_content(html)
             return page.evaluate(
-                f"""() => {{
+                f"""(confirmedLabels) => {{
                     const extractBody = {EXTRACT_BODY_JS};
-                    return extractBody(document.body);
-                }}"""
+                    return extractBody(document.body, confirmedLabels);
+                }}""",
+                confirmed_labels or [],
             )
 
         yield run
@@ -47,6 +48,12 @@ def table_lines(text: str) -> list[str]:
 
 
 CASES = [
+    pytest.param(
+        """<table><tr><td>하 사 관</td><td><span>조</span> <span>직</span></td>
+        <td>구  분</td></tr><tr><td>상사</td><td>교수부</td><td>가</td></tr></table>""",
+        ["| 하 사 관 | 조 직 | 구 분 |", "|---|---|---|", "| 상사 | 교수부 | 가 |"],
+        id="source-inline-letter-spacing-preserved",
+    ),
     pytest.param(
         """<table><tr><td>Number</td><td>Letter</td></tr>
         <tr><td><p>2</p><p>3</p><p>4</p></td>
@@ -202,3 +209,23 @@ CASES = [
 @pytest.mark.parametrize("html,expected", CASES)
 def test_table_markdown(extract, html: str, expected: list[str]):
     assert table_lines(extract(html)) == expected
+
+
+@pytest.mark.parametrize("tag", ["p", "div"])
+def test_confirmed_header_label_only(extract, tag):
+    pieces = f"<{tag}>입학인재</{tag}><{tag}>관리과</{tag}>"
+    html = f"""<table><tr><td>{pieces}</td><td><p>합격</p><p>불합격</p></td></tr>
+    <tr><td>{pieces}</td><td><p>4.50</p><p>4.40-4.49</p></td></tr></table>"""
+    assert table_lines(extract(html, [["입학인재", "관리과"]])) == [
+        "| 입학인재관리과 | 합격 / 불합격 |", "|---|---|",
+        "| 입학인재 / 관리과 | 4.50 / 4.40-4.49 |",
+    ]
+
+
+def test_unconfirmed_or_changed_label_keeps_separator(extract):
+    html = """<table><tr><td><p>입학인재</p><p>관리과</p></td>
+    <td><p>입학인재</p><p>관리과장</p></td></tr></table>"""
+    assert table_lines(extract(html))[0] == "| 입학인재 / 관리과 | 입학인재 / 관리과장 |"
+    assert table_lines(extract(html, [["입학인재", "관리과"]]))[0] == (
+        "| 입학인재관리과 | 입학인재 / 관리과장 |"
+    )
