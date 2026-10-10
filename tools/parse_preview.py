@@ -29,8 +29,15 @@ BULLET_RE = re.compile(r"^[ㆍ‣○□]\s*")
 TABLE_SPLIT_RE = re.compile(r"\s{2,}")
 
 # The DOM → text/table extractor lives in its own file so tests can run it against local
-# HTML fixtures (tools/tests/test_extract_body.py). It evaluates to (root) => string.
+# HTML fixtures (tools/tests/test_extract_body.py).
 EXTRACT_BODY_JS = (Path(__file__).resolve().parent / "extract_body.js").read_text(encoding="utf-8")
+
+# Exact first-row label pieces verified in the finance preview (fileNo 1693).
+# Evidence and extension rules: docs/table-parser-followups.md. Never infer these
+# corrections from cell width or apply them to unrelated source documents.
+CONFIRMED_WRAPPED_HEADERS = {
+    1693: [["입학인재", "관리과"]],
+}
 
 _TBL_START = "<<<TBL>>>"
 _TBL_END = "<<</TBL>>>"
@@ -42,7 +49,7 @@ class ParseResult:
     markdown: str
 
 
-def _extract_lines(page) -> list[str]:
+def _extract_lines(page, file_no: int | None = None) -> list[str]:
     """iframe#innerWrap > #content_body 에서 줄 배열을 뽑는다.
 
     innerText 는 요소의 layout 범위(overflow 등)에 의존하므로 대신 DOM 을 직접
@@ -53,7 +60,7 @@ def _extract_lines(page) -> list[str]:
     convert_to_markdown() 에서 그대로 통과시킨다.
     """
     text: str = page.evaluate(
-        f"""() => {{
+        f"""(confirmedLabels) => {{
             const extractBody = {EXTRACT_BODY_JS};
             const iframe = document.querySelector('iframe#innerWrap');
             if (!iframe) return '';
@@ -61,8 +68,9 @@ def _extract_lines(page) -> list[str]:
             if (!doc) return '';
             const body = doc.querySelector('#content_body');
             if (!body) return '';
-            return extractBody(body);
-        }}"""
+            return extractBody(body, confirmedLabels);
+        }}""",
+        CONFIRMED_WRAPPED_HEADERS.get(file_no, []),
     )
     return [line.strip() for line in text.splitlines() if line.strip()]
 
@@ -166,7 +174,7 @@ def parse_preview(file_no: int, headless: bool = True) -> ParseResult:
             page.goto(url, wait_until="networkidle", timeout=NAVIGATE_TIMEOUT_MS)
             page.wait_for_timeout(POST_LOAD_WAIT_MS)
             _wait_for_completion(page)
-            lines = _extract_lines(page)
+            lines = _extract_lines(page, file_no=file_no)
         finally:
             browser.close()
     if not lines:
