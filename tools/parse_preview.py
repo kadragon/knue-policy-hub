@@ -9,14 +9,20 @@ URL 규칙: https://www.knue.ac.kr/www/previewMenuCntFile.do?key=392&fileNo={fil
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess
+from collections import Counter
+from tempfile import TemporaryDirectory
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from playwright.sync_api import Error as PlaywrightError, sync_playwright
+from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 PREVIEW_URL = "https://www.knue.ac.kr/www/previewMenuCntFile.do?key=392&fileNo={file_no}"
+DOWNLOAD_URL = "https://www.knue.ac.kr/downloadContentsFile.do?key=392&fileNo={file_no}"
+HWP_CONVERT_TIMEOUT_SECONDS = 120
 NAVIGATE_TIMEOUT_MS = 30_000
 POST_LOAD_WAIT_MS = 5_000
 CONTENT_LOAD_TIMEOUT_MS = 60_000
@@ -84,6 +90,63 @@ def _wait_for_completion(page) -> None:
         }""",
         timeout=CONTENT_LOAD_TIMEOUT_MS,
     )
+
+
+def _verify_hwp_text(paragraphs: list[str], text: str, *, markdown: bool = False) -> None:
+    """Reject missing source paragraphs, including repeated table-cell values."""
+    def normalize(value):
+        return re.sub(r"\s+", "", value.replace("\\|", "|"))
+
+    expected = Counter(normalize(convert_to_markdown([p]) if markdown else p) for p in paragraphs)
+    actual = normalize(text)
+    if not expected or any(actual.count(p) < count for p, count in expected.items() if p):
+        raise RuntimeError("HWP source text missing from recovered content")
+
+
+def _recover_hwp(page, file_no: int) -> list[str]:
+    """Recover only from the official download for the same file number."""
+    response = page.request.get(DOWNLOAD_URL.format(file_no=file_no), timeout=NAVIGATE_TIMEOUT_MS)
+    try:
+        if not response.ok:
+            raise RuntimeError(f"HWP download failed (HTTP {response.status}, fileNo={file_no})")
+        data = response.body()
+    finally:
+        response.dispose()
+    if not data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        raise RuntimeError(f"Official download is not an HWP compound file (fileNo={file_no})")
+    with TemporaryDirectory(prefix="knue-hwp-") as tmp:
+        source = Path(tmp) / "source.hwp"
+        source.write_bytes(data)
+        try:
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("hwp_fallback.py")), str(source)],
+                capture_output=True, text=True, encoding="utf-8", check=True,
+                timeout=HWP_CONVERT_TIMEOUT_SECONDS,
+            )
+            recovered = json.loads(result.stdout)
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            raise RuntimeError(f"HWP conversion failed (fileNo={file_no}): {exc}") from exc
+    # Serve no converted assets or scripts; extraction uses the existing table logic.
+    recovery_context = page.context.browser.new_context(java_script_enabled=False)
+    recovery_page = recovery_context.new_page()
+    try:
+        recovery_page.route("**/*", lambda route: route.abort())
+        recovery_page.set_content(recovered["html"], wait_until="domcontentloaded")
+        if recovery_page.locator("body img, body object, body svg").count():
+            raise RuntimeError("HWP contains unsupported visual content")
+        body_text = recovery_page.locator("body").text_content() or ""
+        _verify_hwp_text(recovered["paragraphs"], body_text)
+        text = recovery_page.evaluate(
+            f"(labels) => ({EXTRACT_BODY_JS})(document.body, labels)",
+            CONFIRMED_WRAPPED_HEADERS.get(file_no, []),
+        )
+        # HWP character runs can contain doubled spaces inside ordinary prose.
+        # Only DOM tables carry column structure; suppress the RAW spacing heuristic.
+        lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines() if line.strip()]
+        _verify_hwp_text(recovered["paragraphs"], convert_to_markdown(lines), markdown=True)
+        return lines
+    finally:
+        recovery_context.close()
 
 
 def _flush_table(buffer: list[list[str]], out: list[str]) -> None:
@@ -173,8 +236,12 @@ def parse_preview(file_no: int, headless: bool = True) -> ParseResult:
             page = browser.new_page()
             page.goto(url, wait_until="networkidle", timeout=NAVIGATE_TIMEOUT_MS)
             page.wait_for_timeout(POST_LOAD_WAIT_MS)
-            _wait_for_completion(page)
-            lines = _extract_lines(page, file_no=file_no)
+            try:
+                _wait_for_completion(page)
+            except PlaywrightTimeoutError:
+                lines = _recover_hwp(page, file_no)
+            else:
+                lines = _extract_lines(page, file_no=file_no)
         finally:
             browser.close()
     if not lines:
