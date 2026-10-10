@@ -11,6 +11,7 @@ import re
 import sys
 from pathlib import Path
 
+from reformat_regulation import _UNIT_RE
 from taxonomy import AUDIENCE_SET, AUDIENCES, DOMAIN_SET, DOMAINS
 
 ROOT = Path(__file__).parent.parent
@@ -276,6 +277,12 @@ def _check_md_file(
     if "․" in text:
         count = text.count("․")
         err(f"{rel}: U+2024(ONE DOT LEADER) {count}개 — U+00B7(·)로 교체 필요")
+        failed = True
+    # Also enforce normalized units for manually replaced blocks that bypass
+    # the RAW-to-Markdown conversion path.
+    units = _UNIT_RE.findall(text)
+    if units:
+        err(f"{rel}: 면적 단위 {len(units)}건이 합자(㎡/㎠/㎢)가 아님 — _normalize_chars() 적용 필요")
         failed = True
 
     return failed
