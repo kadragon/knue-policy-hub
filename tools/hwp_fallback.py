@@ -32,9 +32,13 @@ def convert(path: Path) -> dict:
                 if model["type"].__name__.startswith("Shape"):
                     raise RuntimeError("HWP contains unsupported drawing content")
                 if model["type"] is ParaText:
-                    text = "".join(chunk for _, chunk in model["content"]["chunks"] if isinstance(chunk, str))
-                    if text.strip():
-                        paragraphs.append(text)
+                    # HWP control 10 is an explicit line break, exported as a
+                    # newline by pyhwp. Keep it as a source-unit boundary.
+                    text = "".join(
+                        chunk if isinstance(chunk, str) else "\n" if chunk["code"] == 10 else ""
+                        for _, chunk in model["content"]["chunks"]
+                    )
+                    paragraphs.extend(line for line in text.splitlines() if line.strip())
     if not paragraphs:
         raise RuntimeError("HWP has no source text")
     output = BytesIO()
