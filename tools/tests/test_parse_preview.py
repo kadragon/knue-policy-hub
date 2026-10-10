@@ -207,3 +207,24 @@ def test_hwp_table_bullets_keep_their_source_form(page, hwp_download):
     hwp_download["html"] = "<body><table><tr><td>□ 신청</td></tr><tr><td>완료</td></tr></table></body>"
     hwp_download["paragraphs"] = ["□ 신청", "완료"]
     assert "| □ 신청 |" in parse_preview._recover_hwp(page, 1598)
+
+
+def test_repeated_numeric_paragraphs_preserve_boundaries():
+    parse_preview._verify_hwp_text(["121", "212", "121"], "121\n212\n121")
+
+
+def test_html_numeric_paragraphs_preserve_boundaries(page, hwp_download):
+    hwp_download["html"] = "<body><p>121</p><p>212</p><p>121</p></body>"
+    hwp_download["paragraphs"] = ["121", "212", "121"]
+    assert parse_preview._recover_hwp(page, 1598) == ["121", "212", "121"]
+
+
+def test_adjacent_paragraphs_cannot_prove_a_missing_combined_paragraph():
+    with pytest.raises(RuntimeError, match="missing"):
+        parse_preview._verify_hwp_text(["121212"], "121\n212")
+
+
+def test_hwp_explicit_line_breaks_preserve_source_units(page, hwp_download):
+    hwp_download["html"] = "<body><p>First clause\nSecond clause</p></body>"
+    hwp_download["paragraphs"] = ["First clause", "Second clause"]
+    assert parse_preview._recover_hwp(page, 1598) == ["First clause", "Second clause"]

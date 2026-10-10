@@ -105,7 +105,9 @@ def _verify_hwp_text(paragraphs: list[str], text: str, *, markdown: bool = False
         if markdown:
             forms.append(normalize(convert_to_markdown([paragraph])))
         expected[tuple(dict.fromkeys(form for form in forms if form))] += 1
-    remaining = normalize(text)
+    # Preserve block boundaries: a match spanning adjacent paragraphs is not
+    # evidence that either source paragraph survived.
+    remaining = "\0".join(normalize(line) for line in text.splitlines())
     if not expected:
         raise RuntimeError("HWP source text missing from recovered content")
     # Match longer paragraphs first so their embedded words cannot also satisfy
@@ -152,7 +154,11 @@ def _recover_hwp(page, file_no: int) -> list[str]:
         recovery_page.set_content(recovered["html"], wait_until="domcontentloaded")
         if recovery_page.locator("body img, body object, body svg").count():
             raise RuntimeError("HWP contains unsupported visual content")
-        body_text = recovery_page.locator("body").text_content() or ""
+        body_text = recovery_page.evaluate("""() =>
+            Array.from(document.body.querySelectorAll('p, td, th'))
+                .filter(el => el.tagName === 'P' || !el.querySelector('p'))
+                .map(el => el.textContent || '').join('\\n')
+        """)
         _verify_hwp_text(recovered["paragraphs"], body_text)
         text = recovery_page.evaluate(
             f"(labels) => ({EXTRACT_BODY_JS})(document.body, labels)",

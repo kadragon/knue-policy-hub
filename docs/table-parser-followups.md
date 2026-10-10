@@ -109,7 +109,9 @@ Unlike the converter CLI, this propagates parse failures instead of accepting
 an exit-zero result after a logged error. Source paragraph strings, including
 repeated values, must occur in both the converted HTML and the final RAW Markdown.
 Longer paragraphs reserve their output spans first; consumed text cannot serve as
-evidence for another paragraph or cell. Table bullets retain their literal form,
+evidence for another paragraph or cell. HTML paragraph boundaries and Markdown
+line boundaries remain explicit so matches cannot cross adjacent numeric values.
+Table bullets retain their literal form,
 while ordinary prose may use the existing Markdown list conversion.
 Existing DOM table extraction preserves spans and cells. Doubled spaces in HWP
 prose are collapsed before RAW conversion so they cannot invent table columns.
