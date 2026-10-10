@@ -111,6 +111,7 @@ def compare(
 
     # 이름 기준으로 변경 감지: 저장된 이름이 새 fileNo에 매핑되었는지 확인
     web_by_name: dict[str, int] = {name: fno for fno, name in web.items()}
+    ambiguous_names = {name for name, count in collections.Counter(web.values()).items() if count > 1}
     changed: list[dict] = []
     actually_new: list[dict] = []
     actually_removed: list[dict] = []
@@ -120,6 +121,9 @@ def compare(
     for fno in removed_file_nos:
         reg = stored_by_file_no[fno]
         name = reg["name"]
+        # Preserve the local entry until the preview resolves an ambiguous title.
+        if name in ambiguous_names:
+            continue
         if name in web_by_name:
             new_fno = web_by_name[name]
             changed.append({
@@ -140,6 +144,8 @@ def compare(
 
     # 매칭되지 않은 새 fileNo → 진짜 새 규정
     for fno in new_file_nos - matched_new_file_nos:
+        if web[fno] in ambiguous_names:
+            continue
         actually_new.append({
             "name": web[fno],
             "file_no": fno,

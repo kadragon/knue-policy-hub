@@ -19,9 +19,7 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 PREVIEW_URL = "https://www.knue.ac.kr/www/previewMenuCntFile.do?key=392&fileNo={file_no}"
 NAVIGATE_TIMEOUT_MS = 30_000
 POST_LOAD_WAIT_MS = 5_000
-MAX_SCROLL_PX = 100_000
-SCROLL_STEP_PX = 800
-STABLE_CONTENT_STREAK = 8  # consecutive same content-length readings before declaring done
+CONTENT_LOAD_TIMEOUT_MS = 60_000
 
 FULLWIDTH_DIGITS = "０１２３４５６７８９"
 H2_PREFIX_RE = re.compile(rf"^[{FULLWIDTH_DIGITS}]+\s+")
@@ -69,47 +67,15 @@ def _extract_lines(page) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def _scroll_to_bottom(page) -> None:
-    """끝까지 스크롤해 lazy-load 콘텐츠를 모두 가져온다.
-
-    scrollHeight 대신 #content_body 텍스트 길이로 안정성을 판단한다.
-    scrollHeight 는 lazy-load 트리거 전 초기 상태에서도 변하지 않아 조기 종료를
-    유발하지만, 텍스트 길이는 실제로 새 콘텐츠가 추가될 때만 변한다.
-    """
-    last_lengths: list[int] = []
-    total = 0
-    while total < MAX_SCROLL_PX:
-        content_len: int = page.evaluate(
-            """() => {
-                const iframe = document.querySelector('iframe#innerWrap');
-                if (iframe && iframe.contentDocument) {
-                    const body = iframe.contentDocument.querySelector('#content_body');
-                    if (body) return body.textContent.length;
-                    return iframe.contentDocument.body.textContent.length;
-                }
-                return document.body.textContent.length;
-            }"""
-        )
-        last_lengths.append(content_len)
-        if len(last_lengths) >= STABLE_CONTENT_STREAK and len(set(last_lengths[-STABLE_CONTENT_STREAK:])) == 1:
-            break
-        page.evaluate(
-            f"""() => {{
-                const iframe = document.querySelector('iframe#innerWrap');
-                if (iframe && iframe.contentDocument && iframe.contentDocument.defaultView) {{
-                    iframe.contentDocument.defaultView.scrollBy(0, {SCROLL_STEP_PX});
-                }} else {{
-                    window.scrollBy(0, {SCROLL_STEP_PX});
-                }}
-            }}"""
-        )
-        page.wait_for_timeout(200)
-        total += SCROLL_STEP_PX
-    else:
-        print(
-            f"WARN: scroll cap reached ({MAX_SCROLL_PX}px) — content may be truncated",
-            file=sys.stderr,
-        )
+def _wait_for_completion(page) -> None:
+    """Reject partial viewer output even when its text length has stopped growing."""
+    page.wait_for_function(
+        """() => {
+            const iframe = document.querySelector('iframe#innerWrap');
+            return iframe?.contentWindow?.localSynap?.completed === 1;
+        }""",
+        timeout=CONTENT_LOAD_TIMEOUT_MS,
+    )
 
 
 def _flush_table(buffer: list[list[str]], out: list[str]) -> None:
@@ -199,7 +165,7 @@ def parse_preview(file_no: int, headless: bool = True) -> ParseResult:
             page = browser.new_page()
             page.goto(url, wait_until="networkidle", timeout=NAVIGATE_TIMEOUT_MS)
             page.wait_for_timeout(POST_LOAD_WAIT_MS)
-            _scroll_to_bottom(page)
+            _wait_for_completion(page)
             lines = _extract_lines(page)
         finally:
             browser.close()

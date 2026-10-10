@@ -48,6 +48,13 @@ def table_lines(text: str) -> list[str]:
 
 CASES = [
     pytest.param(
+        """<table><tr><td>Number</td><td>Letter</td></tr>
+        <tr><td><p>2</p><p>3</p><p>4</p></td>
+        <td><p>A</p><p>B</p><p>C</p></td></tr></table>""",
+        ["| Number | Letter |", "|---|---|", "| 2 / 3 / 4 | A / B / C |"],
+        id="single-character-values-not-vertical-labels",
+    ),
+    pytest.param(
         # 조직 설치 규정 형태: 가로 스팬이 덮은 열은 원점에서 한 번만 찍는다.
         """<table>
           <tr><td colspan="3">조 직</td><td>직 위</td></tr>
@@ -98,6 +105,15 @@ CASES = [
         </table>""",
         ["| 학술지/출판사 | 비고 |", "|---|---|", "| 가 | 나 |"],
         id="literal-slash-not-doubled",
+    ),
+    pytest.param(
+        # A punctuation-only piece connects a wrapped label.
+        """<table>
+          <tr><td><p>대위</p><p>․</p><p>소위</p></td><td>수당</td></tr>
+          <tr><td>가</td><td>1</td></tr>
+        </table>""",
+        ["| 대위․소위 | 수당 |", "|---|---|", "| 가 | 1 |"],
+        id="punctuation-piece-glued",
     ),
     pytest.param(
         # 서식의 빈 기입란 스무 줄은 빈 행 한 줄로 축약한다.
@@ -160,6 +176,16 @@ CASES = [
         </table>""",
         ["| 항목 | 값 |", "|---|---|", "| 가 | 1 |"],
         id="spacer-row-dropped",
+    ),
+    pytest.param(
+        # An overlapping colspan must not erase the rowspan value B.
+        """<table>
+          <tr><td>구분</td><td>값</td></tr>
+          <tr><td>A</td><td rowspan="2">B</td></tr>
+          <tr><td colspan="2">C</td></tr>
+        </table>""",
+        ["| 구분 | 값 |", "|---|---|", "| A | B |", "| C | B |"],
+        id="colspan-skips-rowspan-slot",
     ),
     pytest.param(
         # 셀 안 파이프는 표 구조를 깨지 않도록 이스케이프한다.

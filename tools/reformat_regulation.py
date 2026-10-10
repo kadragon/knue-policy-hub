@@ -20,7 +20,7 @@ _NOISE_RE = re.compile(
 
 # 개정 이력 줄 패턴
 _HISTORY_RE = re.compile(
-    r"^(?:제정|개정|전부개정|일부개정)\s+\d{4}\."
+    r"^(?:제정|개정|전부개정|일부개정|변경)\s+\d{4}\."
     r"|^\[시행\s+\d{4}\."
 )
 
@@ -41,7 +41,7 @@ _APPENDIX_RE = re.compile(
     r"^[\[<]?("
     r"부\s*칙"
     r"|별표\s*\d*"
-    r"|별지(?:\s*제?\s*\d+\s*호?(?:\s*서식)?|\s*서식)"
+    r"|별지(?:\s*제?\s*\d+(?:의\s*\d+)?\s*호?(?:\s*서식)?|\s*서식)"
     r")[\]>]?\s*(.*)"
 )
 
@@ -92,9 +92,18 @@ def _normalize_chars(text: str) -> str:
     return _UNIT_RE.sub(lambda m: _UNIT_SQUARED[(m.group(1) or "").lower()], text)
 
 
-def reformat(raw: str, reg_name: str) -> str:
+def _norm_title(text: str) -> str:
+    return re.sub(r"\s+", "", text.removeprefix("# ").removesuffix(" 전문"))
+
+
+def reformat(raw: str, reg_name: str, source_name: str | None = None) -> str:
     raw = _normalize_chars(raw)
     lines = [ln.rstrip() for ln in raw.splitlines()]
+    # Validate before discarding the source title or writing the destination H1.
+    source_title = next((ln.strip() for ln in lines if ln.strip() and not _is_noise(ln.strip())), "")
+    expected_title = source_name or reg_name
+    if _norm_title(source_title) != _norm_title(expected_title):
+        raise ValueError(f"Source title mismatch: expected {expected_title!r}, got {source_title!r}")
 
     # 장(章) 존재 여부에 따라 조문 헤더 레벨 결정
     has_chapters = any(_CHAPTER_RE.match(ln.strip()) for ln in lines)
@@ -114,7 +123,7 @@ def reformat(raw: str, reg_name: str) -> str:
     while i < len(lines):
         ln = lines[i].strip()
         i += 1
-        if not ln or ln == "---" or _is_noise(ln) or ln == reg_name:
+        if not ln or ln == "---" or _is_noise(ln) or _norm_title(ln) == _norm_title(expected_title):
             continue
         if _HISTORY_RE.match(ln) or ln.startswith("[시행"):
             history.append(ln)
@@ -134,6 +143,8 @@ def reformat(raw: str, reg_name: str) -> str:
     # 헤더 작성
     out.append(f"# {reg_name}")
     out.append("")
+    if _norm_title(expected_title) != _norm_title(reg_name):
+        out.extend([expected_title, ""])
     if history:
         for j, h in enumerate(history):
             # 마지막 이력 줄을 제외한 줄 끝에 두 칸 공백(Markdown hard break)
@@ -153,7 +164,7 @@ def reformat(raw: str, reg_name: str) -> str:
                 out.append("")
             continue
 
-        if _is_noise(ln) or ln == reg_name:
+        if _is_noise(ln) or _norm_title(ln) == _norm_title(expected_title):
             continue
 
         if ln == "---":
@@ -251,11 +262,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="KNUE 규정 RAW → 저장소 양식 변환")
     parser.add_argument("--raw", required=True, help="parse_preview.py 출력 파일 경로")
     parser.add_argument("--reg-name", required=True, help="규정명 (예: 한국교원대학교 학칙)")
+    parser.add_argument("--source-name", help="인덱스의 official_name (목록명과 원문 제목이 다른 경우)")
     parser.add_argument("--out", help="출력 파일 경로 (생략 시 stdout)")
     args = parser.parse_args()
 
     raw_text = Path(args.raw).read_text(encoding="utf-8")
-    result = reformat(raw_text, args.reg_name)
+    try:
+        result = reformat(raw_text, args.reg_name, args.source_name)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.out:
         Path(args.out).write_text(result, encoding="utf-8")

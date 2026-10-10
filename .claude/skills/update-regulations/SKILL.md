@@ -85,7 +85,7 @@ b) 미리보기 파싱:
 uv run --project tools python tools/parse_preview.py --file-no <new_fno> \
   > "/tmp/raw_<new_fno>.md"
 ```
-c) 규칙 기반 재정렬:
+c) Reformat. If the index has `official_name`, also pass `--source-name "<official_name>"`:
 ```bash
 uv run --project tools python tools/reformat_regulation.py \
   --raw "/tmp/raw_<new_fno>.md" \
@@ -102,10 +102,15 @@ git commit -m "[FIX] 규정 갱신: <name> (fileNo=<new_fno>, closes #<N>)"
 
 이슈 body 에서 `fileNo(<fno>)`, `규정명(<name>)` 추출.
 
-0. **규정명 검증**: `parse_preview.py --file-no <fno>` 출력 **첫 줄**이 이슈의 `<name>` 과 일치하는지 먼저 확인한다. 웹 목록의 `title` 속성은 앞 항목 이름이 잘못 붙는 경우가 있어(예: fileNo 1596 = 실제 「교수회 규정」, 목록은 「교수회평의회 규정」) 그대로 믿으면 **기존 규정 파일을 덮어쓴다**. 불일치하면 본문 첫 줄을 정본으로 삼아 `regulations.json` 의 `name` 을 정정하고 사용자에게 보고한다.
+0. **Validate the source name**: run `parse_preview.py --file-no <fno>` once and save
+   its output to `/tmp/raw_<fno>.md`. Compare its first nonempty title with the
+   issue name, ignoring whitespace. Website list titles can carry a neighboring
+   regulation's name (1596 is `교수회 규정`, listed as `교수회평의회 규정`). If
+   they differ, use the verified body title to correct the index and report it.
+   Never overwrite a destination based only on the website list title.
 1. **section 결정**: AskUserQuestion 으로 편/장 선택(기존 `regulations.json` 의 `section` 값 후보 + 직접 입력).
 2. 대상 경로 `DEST="규정/<section>/<name>.md"`. 이미 존재하면 스킵(사용자에게 보고).
-3. 파싱: `parse_preview.py --file-no <fno>` → `/tmp/raw_<fno>.md`
+3. Reuse `/tmp/raw_<fno>.md` from step 0; do not fetch the preview again.
 4. 규칙 기반 재정렬:
    ```bash
    uv run --project tools python tools/reformat_regulation.py \

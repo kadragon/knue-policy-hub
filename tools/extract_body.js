@@ -13,13 +13,22 @@
     // 세로쓰기, never a list of values. Two multi-character blocks are ambiguous
     // (부처 + 국본부장 is a wrapped label, 합격 + 불합격 is two values), so they keep
     // the separator — splitting a label costs a grep, gluing two values loses data.
+    // A block that is only a middle dot is the same kind of certainty: it is the
+    // joint of one wrapped label (대위 + ․ + 소위 → 대위․소위), never a value.
     function joinPieces(parts) {
         if (parts.length < 2) return parts.join('');
-        const single = s => [...s].length === 1;
+        // Numeric and Latin one-character values are lists, not vertical Korean.
+        const single = s => /^[가-힣]$/.test(s);
+        const joint = s => /^[·․ㆍ‧・]$/.test(s);
         const merged = [];
         let run = false;   // the last entry is a run of single-character blocks
+        let glue = false;  // the last entry ends with a joint; the next block attaches
         for (const s of parts) {
-            if (run && single(s)) {
+            if (merged.length && (glue || joint(s))) {
+                merged[merged.length - 1] += s;
+                glue = joint(s);
+                run = false;
+            } else if (run && single(s)) {
                 merged[merged.length - 1] += s;   // 계 + 급 + 별 → 계급별
             } else {
                 merged.push(s);
@@ -132,6 +141,9 @@
                     src[r + dr] = src[r + dr] || [];
                     srcc[r + dr] = srcc[r + dr] || [];
                     for (let dc = 0; dc < cs; dc++) {
+                        // A rowspan from above already owns this slot (malformed
+                        // overlap in the source); overwriting it would drop that value.
+                        if (grid[r + dr][c + dc] !== undefined) continue;
                         grid[r + dr][c + dc] = text;
                         src[r + dr][c + dc] = r;
                         srcc[r + dr][c + dc] = c;
