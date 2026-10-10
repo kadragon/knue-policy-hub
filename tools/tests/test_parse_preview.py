@@ -196,3 +196,14 @@ def test_hwp_prose_spacing_does_not_invent_tables(page, hwp_download):
     hwp_download["paragraphs"] = ["First sentence  revision.", "Last sentence  revision."]
     lines = parse_preview._recover_hwp(page, 1598)
     assert parse_preview.convert_to_markdown(lines) == "First sentence revision.\nLast sentence revision.\n"
+
+
+def test_missing_short_paragraphs_cannot_reuse_long_paragraph_text():
+    with pytest.raises(RuntimeError, match="missing"):
+        parse_preview._verify_hwp_text(["성명", "성명", "성명 : 성명"], "성명 : 성명")
+
+
+def test_hwp_table_bullets_keep_their_source_form(page, hwp_download):
+    hwp_download["html"] = "<body><table><tr><td>□ 신청</td></tr><tr><td>완료</td></tr></table></body>"
+    hwp_download["paragraphs"] = ["□ 신청", "완료"]
+    assert "| □ 신청 |" in parse_preview._recover_hwp(page, 1598)

@@ -97,10 +97,28 @@ def _verify_hwp_text(paragraphs: list[str], text: str, *, markdown: bool = False
     def normalize(value):
         return re.sub(r"\s+", "", value.replace("\\|", "|"))
 
-    expected = Counter(normalize(convert_to_markdown([p]) if markdown else p) for p in paragraphs)
-    actual = normalize(text)
-    if not expected or any(actual.count(p) < count for p, count in expected.items() if p):
+    expected = Counter()
+    for paragraph in paragraphs:
+        # Table blocks retain literal bullets; ordinary prose may turn them into
+        # Markdown lists. Both representations must reserve their own output span.
+        forms = [normalize(paragraph)]
+        if markdown:
+            forms.append(normalize(convert_to_markdown([paragraph])))
+        expected[tuple(dict.fromkeys(form for form in forms if form))] += 1
+    remaining = normalize(text)
+    if not expected:
         raise RuntimeError("HWP source text missing from recovered content")
+    # Match longer paragraphs first so their embedded words cannot also satisfy
+    # missing standalone cells. Mask consumed spans without joining their neighbors.
+    for forms, count in sorted(expected.items(), key=lambda item: max(map(len, item[0]), default=0), reverse=True):
+        for _ in range(count):
+            for form in forms:
+                index = remaining.find(form)
+                if index >= 0:
+                    remaining = remaining[:index] + "\0" * len(form) + remaining[index + len(form):]
+                    break
+            else:
+                raise RuntimeError("HWP source text missing from recovered content")
 
 
 def _recover_hwp(page, file_no: int) -> list[str]:
