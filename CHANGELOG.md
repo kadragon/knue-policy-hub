@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Cover update CLI safety and run tests on every quality workflow (2026-10-24)
 - [done] Preserve paragraph boundaries in HWP coverage checks (2026-10-10) → docs/table-parser-followups.md
 - [done] Verify HWP text without reusing matched paragraphs (2026-10-10) → docs/table-parser-followups.md
 - [done] Recover incomplete previews from official HWP files (2026-10-10) → docs/table-parser-followups.md
