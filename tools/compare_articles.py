@@ -20,7 +20,9 @@ from reformat_regulation import _APPENDIX_RE, _CHAPTER_RE, _SECTION_RE
 
 _HEADER_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$")
 # 제N조 / 제N조의M — the source sometimes writes "제4조의 2".
-_ARTICLE_HEAD_RE = re.compile(r"^(제\d+조(?:의\s*\d+)?)(.*)$")
+# A boundary must follow the number: "제10조2(소위원회)" is not 제10조.
+_ARTICLE_HEAD_RE = re.compile(r"^(제\d+조(?:의\s*\d+)?)(?=[\s(<]|$)(.*)$")
+_EXTRA_APPENDIX_RE = re.compile(r"^[\[<]?(?:붙임|별첨)")
 
 ADDED, DELETED, MODIFIED = "추가", "삭제", "수정"
 
@@ -47,39 +49,46 @@ def _normalize_line(line: str) -> str:
     return re.sub(r"\s+", " ", line).strip()
 
 
-def parse_articles(text: str, source: str = "input") -> tuple[str, dict[str, Article]]:
-    """Return (H1 title, articles in document order).
+def parse_articles(text: str, source: str = "input") -> tuple[str, dict[str, Article], list[str]]:
+    """Return (H1 title, articles in document order, ambiguous article numbers).
 
-    Raises ValueError when one article number appears twice, because pairing by
-    number would then be ambiguous.
+    A number that heads more than one body article cannot be paired safely, so it
+    is left out of the articles and reported in the third item instead.
+    Raises ValueError when no body article is found (e.g. unformatted input).
     """
     title = ""
     articles: dict[str, Article] = {}
-    current: tuple[str, list[str]] | None = None
+    ambiguous: list[str] = []
+    # (number, heading level, lines)
+    current: tuple[str, int, list[str]] | None = None
     in_appendix = False
 
     def flush() -> None:
         nonlocal current
         if current is None:
             return
-        number, lines = current
+        number, _, lines = current
+        current = None
+        if number in ambiguous:
+            return
         if number in articles:
-            raise ValueError(f"{source}: duplicate article number {number}")
+            del articles[number]
+            ambiguous.append(number)
+            return
         body = [ln for ln in (_normalize_line(x) for x in lines) if ln]
         articles[number] = Article(number, "\n".join(body))
-        current = None
 
     for raw in text.splitlines():
         header = _HEADER_RE.match(raw)
         if header is None:
             if current is not None:
-                current[1].append(raw)
+                current[2].append(raw)
             continue
         head = header.group(1)
         if raw.startswith("# ") and not title:
             title = head
             continue
-        if _APPENDIX_RE.match(head):
+        if _APPENDIX_RE.match(head) or _EXTRA_APPENDIX_RE.match(head):
             flush()
             in_appendix = True
             continue
@@ -87,17 +96,25 @@ def parse_articles(text: str, source: str = "input") -> tuple[str, dict[str, Art
             flush()
             in_appendix = False
             continue
+        level = len(raw) - len(raw.lstrip("#"))
         match = _ARTICLE_HEAD_RE.match(head)
         if match is None or in_appendix:
-            # Other headings keep belonging to the current block; inside an
-            # appendix everything is skipped, article-like headings included.
-            if current is not None and not in_appendix:
-                current[1].append(raw)
+            # Inside an appendix everything is skipped, article-like headings
+            # included. Elsewhere a sub-heading deeper than the article belongs to
+            # it; a heading at its level or above ends it without joining it.
+            if in_appendix:
+                continue
+            if current is not None and level > current[1]:
+                current[2].append(raw)
+            else:
+                flush()
             continue
         flush()
-        current = (_normalize_number(match.group(1)), [match.group(2)])
+        current = (_normalize_number(match.group(1)), level, [match.group(2)])
     flush()
-    return title, articles
+    if not articles and not ambiguous:
+        raise ValueError(f"{source}: no body articles found (expects reformatted markdown headings)")
+    return title, articles, ambiguous
 
 
 def diff_articles(old: dict[str, Article], new: dict[str, Article]) -> list[Change]:
@@ -125,8 +142,8 @@ body{font-family:'Malgun Gothic',sans-serif;margin:2rem;color:#222}
 table{border-collapse:collapse;width:100%;table-layout:fixed}
 th,td{border:1px solid #bbb;padding:.5rem;vertical-align:top;text-align:left}
 th{background:#f0f0f0}
+th.kind,td.kind{width:5rem}th.num,td.num{width:8rem}
 td.text{white-space:pre-wrap;word-break:break-word}
-td.kind{width:5rem}td.num{width:8rem}
 tr.added td.kind{background:#e6f4ea}tr.deleted td.kind{background:#fce8e6}
 tr.modified td.kind{background:#fef7e0}
 .notice{background:#f6f6f6;border-left:4px solid #888;padding:.5rem 1rem;margin:1rem 0}
@@ -141,6 +158,8 @@ def render_html(
     new_label: str,
     old_title: str = "",
     new_title: str = "",
+    old_ambiguous: list[str] | None = None,
+    new_ambiguous: list[str] | None = None,
 ) -> str:
     e = html.escape
     counts = {k: sum(1 for c in changes if c.kind == k) for k in (MODIFIED, ADDED, DELETED)}
@@ -161,6 +180,12 @@ def render_html(
     ]
     if old_title and new_title and old_title != new_title:
         notices.append(f"주의: 두 파일의 규정명이 다릅니다 ({old_title} / {new_title}).")
+    for label, numbers in (("이전", old_ambiguous), ("이후", new_ambiguous)):
+        if numbers:
+            notices.append(
+                f"주의: {label} 파일에서 번호가 중복되어 짝을 맞출 수 없는 조문은 비교하지 않았습니다: "
+                + ", ".join(numbers)
+            )
     return (
         '<!DOCTYPE html>\n<html lang="ko"><head><meta charset="utf-8">'
         "<title>조문별 신구 검토표</title>"
@@ -169,19 +194,23 @@ def render_html(
         f"<p>이전: {e(old_label)}<br>이후: {e(new_label)}</p>\n"
         f"<p>수정 {counts[MODIFIED]}건 · 추가 {counts[ADDED]}건 · 삭제 {counts[DELETED]}건</p>\n"
         + "".join(f'<p class="notice">{e(n)}</p>\n' for n in notices)
-        + "<table><thead><tr><th>구분</th><th>조문</th><th>이전</th><th>이후</th></tr></thead>\n<tbody>\n"
+        + '<table><thead><tr><th class="kind">구분</th><th class="num">조문</th><th>이전</th><th>이후</th></tr></thead>\n<tbody>\n'
         + "\n".join(rows)
         + "\n</tbody></table>\n</body></html>\n"
     )
 
 
 def compare_files(old_path: Path, new_path: Path) -> str:
-    old_title, old_articles = parse_articles(old_path.read_text(encoding="utf-8"), str(old_path))
-    new_title, new_articles = parse_articles(new_path.read_text(encoding="utf-8"), str(new_path))
+    old_title, old_articles, old_dup = parse_articles(old_path.read_text(encoding="utf-8"), str(old_path))
+    new_title, new_articles, new_dup = parse_articles(new_path.read_text(encoding="utf-8"), str(new_path))
     return render_html(
         diff_articles(old_articles, new_articles),
-        str(old_path), str(new_path), old_title, new_title,
+        str(old_path), str(new_path), old_title, new_title, old_dup, new_dup,
     )
+
+
+def _same_file(path: Path, others: list[Path]) -> bool:
+    return path.exists() and any(o.exists() and path.samefile(o) for o in others)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -193,14 +222,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, help="HTML output path (default: stdout)")
     args = parser.parse_args(argv)
     try:
+        if args.out and _same_file(args.out, [args.old, args.new]):
+            raise ValueError(f"--out {args.out} is one of the input files; refusing to overwrite it")
         page = compare_files(args.old, args.new)
+        if args.out:
+            args.out.write_text(page, encoding="utf-8")
+        else:
+            sys.stdout.buffer.write(page.encode("utf-8"))
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    if args.out:
-        args.out.write_text(page, encoding="utf-8")
-    else:
-        sys.stdout.buffer.write(page.encode("utf-8"))
     return 0
 
 

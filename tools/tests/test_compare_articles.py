@@ -108,10 +108,38 @@ def test_html_escapes_source_text(tmp_path):
     assert "&lt;script&gt;alert(1)&lt;/script&gt; &amp; &lt;b&gt;" in page
 
 
-def test_duplicate_article_number_is_rejected():
-    text = _md("### 제1조(목적)\n\n가.\n", "### 제1조(정의)\n\n나.\n")
-    with pytest.raises(ValueError, match="duplicate article number 제1조"):
-        compare_articles.parse_articles(text, "old.md")
+def test_duplicate_number_is_reported_and_other_articles_still_compared(tmp_path):
+    dup = ("### 제1조(목적)\n\n가.\n", "### 제1조(삭제)\n\n삭제\n")
+    old = _md(*dup, "### 제2조(정의)\n\n옛 정의.\n")
+    new = _md(*dup, "### 제2조(정의)\n\n새 정의.\n")
+    page = _compare(old, new, tmp_path)
+    assert _rows(page) == ["modified"]
+    assert "번호가 중복되어 짝을 맞출 수 없는 조문은 비교하지 않았습니다: 제1조" in page
+
+
+def test_unformatted_input_is_rejected():
+    with pytest.raises(ValueError, match="no body articles found"):
+        compare_articles.parse_articles("제1조(목적) 이 규정은...\n", "raw.md")
+
+
+def test_malformed_number_is_not_truncated_to_the_article_before_it(tmp_path):
+    old = _md("### 제10조(위원회)\n\n같다.\n", "### 제10조2(소위원회)\n\n소위원회 본문.\n")
+    new = _md("### 제10조(위원회)\n\n같다.\n", "### 제10조의2(소위원회)\n\n소위원회 본문.\n")
+    # The malformed heading is not an article, so it neither collides with 제10조
+    # nor leaks into it: only the corrected 제10조의2 shows up, as an addition.
+    assert _rows(_compare(old, new, tmp_path)) == ["added"]
+
+
+def test_trailing_attachment_does_not_modify_last_article(tmp_path):
+    old = _md("### 제1조(목적)\n\n본문.\n", appendix="\n## [붙임] 목록\n\n옛 표\n")
+    new = _md("### 제1조(목적)\n\n본문.\n", appendix="\n## [붙임] 목록\n\n새 표\n")
+    assert _rows(_compare(old, new, tmp_path)) == []
+
+
+def test_deeper_subheading_stays_inside_its_article(tmp_path):
+    old = _md("### 제1조(요금)\n\n#### 가. 기본\n\n1000원\n")
+    new = _md("### 제1조(요금)\n\n#### 가. 기본\n\n2000원\n")
+    assert _rows(_compare(old, new, tmp_path)) == ["modified"]
 
 
 def test_cli_writes_utf8_html(tmp_path, capsys):
@@ -127,8 +155,23 @@ def test_cli_missing_file_exits_nonzero(tmp_path, capsys):
     assert "error:" in capsys.readouterr().err
 
 
-def test_cli_duplicate_number_exits_nonzero(tmp_path, capsys):
-    dup = tmp_path / "dup.md"
-    dup.write_text(_md("### 제1조(목적)\n\n가.\n", "### 제1조(정의)\n\n나.\n"), encoding="utf-8")
-    assert compare_articles.main([str(dup), str(NEW)]) == 1
-    assert "duplicate article number" in capsys.readouterr().err
+def test_cli_unformatted_input_exits_nonzero(tmp_path, capsys):
+    raw = tmp_path / "raw.md"
+    raw.write_text("제1조(목적) 이 규정은...\n", encoding="utf-8")
+    assert compare_articles.main([str(raw), str(NEW)]) == 1
+    assert "no body articles found" in capsys.readouterr().err
+
+
+def test_cli_refuses_to_overwrite_an_input(tmp_path, capsys):
+    new = tmp_path / "new.md"
+    original = NEW.read_text(encoding="utf-8")
+    new.write_text(original, encoding="utf-8")
+    assert compare_articles.main([str(OLD), str(new), "--out", str(new)]) == 1
+    assert new.read_text(encoding="utf-8") == original
+    assert "refusing to overwrite" in capsys.readouterr().err
+
+
+def test_cli_unwritable_out_exits_nonzero(tmp_path, capsys):
+    out = tmp_path / "missing-dir" / "diff.html"
+    assert compare_articles.main([str(OLD), str(NEW), "--out", str(out)]) == 1
+    assert "error:" in capsys.readouterr().err
