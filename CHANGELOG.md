@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Add --ignore-line-breaks option to the article comparison CLI (2026-11-27) → tools/compare_articles.py
 - [done] Add article-level old/new comparison CLI for regulation markdown (2026-11-27) → tools/compare_articles.py
 - [done] Cover update CLI safety and run tests on every quality workflow (2026-10-24)
 - [done] Preserve paragraph boundaries in HWP coverage checks (2026-10-10) → docs/table-parser-followups.md
