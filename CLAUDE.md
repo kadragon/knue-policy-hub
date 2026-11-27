@@ -23,6 +23,7 @@ uv run --project tools python tools/check_updates.py --check-revisions [--worker
 
 # Compare two versions of a regulation (old.md new.md) → HTML of changed articles only
 uv run --project tools python tools/compare_articles.py old.md new.md --out diff.html
+# Add --ignore-whitespace when the copies differ only in line wrapping or spacing (all whitespace ignored)
 
 # Run the table-parser tests (local HTML fixtures, no network)
 uv run --project tools --with pytest pytest tools/tests -q
@@ -110,7 +111,7 @@ no U+2024) — read it rather than restating thresholds here.
 | `tools/parse_preview.py` | Playwright headless scraper: preview URL → RAW markdown |
 | `tools/extract_body.js` | `parse_preview.py`가 페이지에서 평가하는 DOM→텍스트/표 추출기 (`tools/tests/test_extract_body.py`가 로컬 fixture로 검증) |
 | `tools/reformat_regulation.py` | Rule-based RAW → repository format converter |
-| `tools/compare_articles.py` | Stdlib CLI: two versions of one regulation's markdown → local HTML table of only the added/deleted/modified articles, paired by body article number (제N조의M); 부칙·별표·별지 excluded, renumbered articles not guessed (review aid, not the official 신구조문대비표) |
+| `tools/compare_articles.py` | Stdlib CLI: two versions of one regulation's markdown → local HTML table of only the added/deleted/modified articles, paired by body article number (제N조의M); 부칙·별표·별지 excluded, renumbered articles not guessed; `--ignore-whitespace` ignores line-break and spacing differences inside articles (review aid, not the official 신구조문대비표) |
 | `tools/taxonomy.py` | `domain`/`audience` allowed-value vocabulary (SSOT) |
 | `tools/check_quality.py` | JSON integrity + taxonomy + markdown quality gate + agent-prompt axis sync (CI) |
 

@@ -142,6 +142,50 @@ def test_deeper_subheading_stays_inside_its_article(tmp_path):
     assert _rows(_compare(old, new, tmp_path)) == ["modified"]
 
 
+def test_ignore_whitespace_skips_rewrapped_article_only_when_enabled(tmp_path):
+    old = _md("### 제3조(휴학)\n\n학생은 질병으로 인하여\n휴학할 수 있다.\n")
+    new = _md("### 제3조(휴학)\n\n학생은 질병으로\n인하여 휴학할 수 있다.\n")
+    (tmp_path / "old.md").write_text(old, encoding="utf-8")
+    (tmp_path / "new.md").write_text(new, encoding="utf-8")
+    default = compare_articles.compare_files(tmp_path / "old.md", tmp_path / "new.md")
+    assert _rows(default) == ["modified"]
+    assert "줄바꿈·띄어쓰기 차이는 무시했습니다" not in default
+    ignored = compare_articles.compare_files(tmp_path / "old.md", tmp_path / "new.md", True)
+    assert _rows(ignored) == []
+    assert "줄바꿈·띄어쓰기 차이는 무시했습니다(띄어쓰기나 항·호 구분 줄바꿈만 바뀐 개정은 표시되지 않음)" in ignored
+
+
+def test_ignore_whitespace_still_catches_text_change_and_keeps_original_lines(tmp_path):
+    old = _md("### 제3조(휴학)\n\n학생은 질병으로 인하여\n휴학할 수 있다.\n")
+    new = _md("### 제3조(휴학)\n\n학생은 질병으로\n인하여 휴학하여야 한다.\n")
+    (tmp_path / "old.md").write_text(old, encoding="utf-8")
+    (tmp_path / "new.md").write_text(new, encoding="utf-8")
+    ignored = compare_articles.compare_files(tmp_path / "old.md", tmp_path / "new.md", True)
+    assert _rows(ignored) == ["modified"]
+    assert "학생은 질병으로 인하여\n휴학할 수 있다." in ignored
+    assert "학생은 질병으로\n인하여 휴학하여야 한다." in ignored
+
+
+def test_cli_ignore_whitespace_flag(tmp_path, capsys):
+    (tmp_path / "old.md").write_text(_md("### 제3조(휴학)\n\n가 나\n다 라\n"), encoding="utf-8")
+    (tmp_path / "new.md").write_text(_md("### 제3조(휴학)\n\n가\n나 다 라\n"), encoding="utf-8")
+    args = [str(tmp_path / "old.md"), str(tmp_path / "new.md")]
+    assert compare_articles.main(args + ["--ignore-whitespace"]) == 0
+    assert _rows(capsys.readouterr().out) == []
+    assert compare_articles.main(args) == 0
+    assert _rows(capsys.readouterr().out) == ["modified"]
+
+
+def test_ignore_whitespace_skips_spacing_only_change(tmp_path):
+    old = _md("### 제3조(휴학)\n\n휴학한다.<개정 2020.1.1.>\n")
+    new = _md("### 제3조(휴학)\n\n휴학한다. <개정 2020.1.1.>\n")
+    (tmp_path / "old.md").write_text(old, encoding="utf-8")
+    (tmp_path / "new.md").write_text(new, encoding="utf-8")
+    paths = (tmp_path / "old.md", tmp_path / "new.md")
+    assert _rows(compare_articles.compare_files(*paths)) == ["modified"]
+    assert _rows(compare_articles.compare_files(*paths, True)) == []
+
+
 def test_cli_writes_utf8_html(tmp_path, capsys):
     out = tmp_path / "diff.html"
     assert compare_articles.main([str(OLD), str(NEW), "--out", str(out)]) == 0
