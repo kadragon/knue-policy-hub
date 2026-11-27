@@ -118,16 +118,16 @@ def parse_articles(text: str, source: str = "input") -> tuple[str, dict[str, Art
 
 
 def diff_articles(
-    old: dict[str, Article], new: dict[str, Article], ignore_line_breaks: bool = False
+    old: dict[str, Article], new: dict[str, Article], ignore_whitespace: bool = False
 ) -> list[Change]:
     """Added, deleted and modified articles; unchanged ones are omitted.
 
-    With ignore_line_breaks, line breaks count as single spaces when deciding
+    With ignore_whitespace, all whitespace (line breaks included) is dropped when deciding
     whether an article changed; the displayed text keeps its original lines.
     """
 
     def key(article: Article) -> str:
-        return article.text.replace("\n", " ") if ignore_line_breaks else article.text
+        return re.sub(r"\s+", "", article.text) if ignore_whitespace else article.text
 
     changes: list[Change] = []
     for number, article in old.items():
@@ -170,7 +170,7 @@ def render_html(
     new_title: str = "",
     old_ambiguous: list[str] | None = None,
     new_ambiguous: list[str] | None = None,
-    ignore_line_breaks: bool = False,
+    ignore_whitespace: bool = False,
 ) -> str:
     e = html.escape
     counts = {k: sum(1 for c in changes if c.kind == k) for k in (MODIFIED, ADDED, DELETED)}
@@ -189,8 +189,8 @@ def render_html(
         "삭제와 추가로 각각 표시합니다.",
         "부칙·별표·별지는 비교 대상에서 제외했습니다. 미변경 조문은 표시하지 않습니다.",
     ]
-    if ignore_line_breaks:
-        notices.append("줄바꿈 차이는 무시했습니다(항·호 구분 줄바꿈만 바뀐 경우는 표시되지 않음)")
+    if ignore_whitespace:
+        notices.append("줄바꿈·띄어쓰기 차이는 무시했습니다(띄어쓰기나 항·호 구분 줄바꿈만 바뀐 개정은 표시되지 않음)")
     if old_title and new_title and old_title != new_title:
         notices.append(f"주의: 두 파일의 규정명이 다릅니다 ({old_title} / {new_title}).")
     for label, numbers in (("이전", old_ambiguous), ("이후", new_ambiguous)):
@@ -213,13 +213,13 @@ def render_html(
     )
 
 
-def compare_files(old_path: Path, new_path: Path, ignore_line_breaks: bool = False) -> str:
+def compare_files(old_path: Path, new_path: Path, ignore_whitespace: bool = False) -> str:
     old_title, old_articles, old_dup = parse_articles(old_path.read_text(encoding="utf-8"), str(old_path))
     new_title, new_articles, new_dup = parse_articles(new_path.read_text(encoding="utf-8"), str(new_path))
     return render_html(
-        diff_articles(old_articles, new_articles, ignore_line_breaks),
+        diff_articles(old_articles, new_articles, ignore_whitespace),
         str(old_path), str(new_path), old_title, new_title, old_dup, new_dup,
-        ignore_line_breaks,
+        ignore_whitespace,
     )
 
 
@@ -235,15 +235,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("new", type=Path, help="newer Markdown file")
     parser.add_argument("--out", type=Path, help="HTML output path (default: stdout)")
     parser.add_argument(
-        "--ignore-line-breaks",
+        "--ignore-whitespace",
         action="store_true",
-        help="treat line breaks inside an article as spaces when deciding what changed",
+        help="ignore line-break and spacing differences inside an article when deciding what changed",
     )
     args = parser.parse_args(argv)
     try:
         if args.out and _same_file(args.out, [args.old, args.new]):
             raise ValueError(f"--out {args.out} is one of the input files; refusing to overwrite it")
-        page = compare_files(args.old, args.new, args.ignore_line_breaks)
+        page = compare_files(args.old, args.new, args.ignore_whitespace)
         if args.out:
             args.out.write_text(page, encoding="utf-8")
         else:
