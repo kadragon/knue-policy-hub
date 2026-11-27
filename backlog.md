@@ -1,4 +1,6 @@
 # Backlog
 
-Remaining work after the 2026-10-10 follow-up. Context, completed findings, and
-verification evidence: [Table parser follow-up verification](docs/table-parser-followups.md).
+Track open work in [GitHub Issues](https://github.com/kadragon/knue-policy-hub/issues).
+
+See the [table parser follow-up](docs/table-parser-followups.md) for findings and
+verification evidence.
