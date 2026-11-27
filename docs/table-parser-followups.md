@@ -73,7 +73,8 @@ columns, `기본` and `배정`. Its existing folded headers were retained.
   changes. Duplicate website labels remain visible in the JSON report.
 
 These checks address the recorded parser/document findings. They are not a fresh
-revision-date audit of all 97 regulations. Remaining limits are in `backlog.md`.
+revision-date audit of all 97 regulations. Track follow-up work in
+[GitHub Issues](https://github.com/kadragon/knue-policy-hub/issues).
 
 ## Wrapped-label follow-up
 
